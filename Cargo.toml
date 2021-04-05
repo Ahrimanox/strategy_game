@@ -1,0 +1,15 @@
+[package]
+name = "graphics_2d"
+version = "0.1.0"
+authors = ["Ahrimanox <clement.dubus@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.8.2"
+image = "0.23.12"
+piston = "0.52.0"
+piston2d-graphics = "0.39.0"
+pistoncore-glutin_window = "0.68.0"
+piston2d-opengl_graphics = "0.77.0"
