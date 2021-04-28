@@ -1,5 +1,5 @@
 [package]
-name = "graphics_2d"
+name = "strategy_game"
 version = "0.1.0"
 authors = ["Ahrimanox <clement.dubus@gmail.com>"]
 edition = "2018"
