@@ -3,7 +3,8 @@ extern crate graphics;
 extern crate opengl_graphics;
 extern crate piston;
 
-use std::collections::*;
+use std::collections::VecDeque;
+use std::ops::{Index, IndexMut};
 use rand::prelude::*;
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, OpenGL};
@@ -13,13 +14,49 @@ use piston::window::WindowSettings;
 use piston::input::keyboard::Key;
 
 use graphics::*;
+use graphics::types::{Color};
 use graphics::rectangle::rectangle_by_corners;
 
+#[derive(Default)]
+struct Map<T> {
+    width: usize,
+    height: usize,
+    map: Vec<T>,
+}
+
+impl<T: Clone> Map<T> {
+    fn new(width: usize, height: usize, value: T) -> Map<T> {
+        // Instantiate underlying map vector and fill it with a predefined
+        let mut map = Vec::new();
+        map.resize(width * height, value);
+
+        Map::<T> {
+            width: width,
+            height: height,
+            map
+        }
+    }
+}
+
+impl<T> Index<(usize, usize)> for Map<T> {
+    type Output = T;
+    fn index(&self, pos: (usize, usize)) -> &Self::Output {
+        let (i, j) = pos;
+        &self.map[i * self.width + j]
+    }
+}
+
+impl<T> IndexMut<(usize, usize)> for Map<T> {
+    fn index_mut(&mut self, pos: (usize, usize)) -> &mut Self::Output {
+        let (i, j) = pos;
+        &mut self.map[i * self.width + j]
+    }
+}
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Unit {
     // Team unit
-    player: u8,
+    player: usize,
 
     // Unit position in grid
     position: [usize; 2],
@@ -32,11 +69,10 @@ pub struct Unit {
     remaining_moves: i32
 }
 
-
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Building {
     // Team unit
-    player: u8,
+    player: usize,
 
     // Unit position in grid
     position: [usize; 2],
@@ -46,32 +82,58 @@ pub struct Building {
     health: i32,
 }
 
-fn diamond_square(n: u32, normalize: bool) -> Vec<Vec<f64>> {
+struct Player {
+    // Base position
+    base_position: [usize; 2],
+
+    // Buildings position
+    buildings_position: Vec<[usize; 2]>,
+
+    // Units position
+    units_position: Vec<[usize; 2]>,
+
+    // Colors
+    principal_color: [f32; 4],
+    secondary_color: [f32; 4]
+}
+
+impl Player {
+    fn new(base_position: [usize; 2], principal_color: [f32; 4], secondary_color: [f32; 4]) -> Player {
+        Player {
+            base_position: base_position,
+            buildings_position: Vec::<[usize; 2]>::new(),
+            units_position: Vec::<[usize; 2]>::new(),
+            principal_color: principal_color,
+            secondary_color: secondary_color
+        }
+    }
+}
+
+fn diamond_square(n: u32, normalize: bool) -> Map<f64> {
     let base: usize = 2;
     let map_dim = base.pow(4+n)+1;
 
-    let mut height_map: Vec<Vec<f64>> = Vec::with_capacity(map_dim);
-    for i in 0..(map_dim) {
-        height_map.push(Vec::with_capacity(map_dim));
-        for _ in 0..(map_dim) {
-            height_map[i].push(0.0);
-        }
-    }
+    // Initialisation de la carte
+    let mut height_map: Map<f64> = Map::<f64>::new(map_dim, map_dim, 0.0);
+
+    // Initialisation du générateur de nombre aléatoire
+    let mut rng = rand::thread_rng();
+
 
     // Initialisation des coins
-    height_map[0][0] = rand::thread_rng().gen_range((-(map_dim as f64))..=(map_dim as f64));
-    height_map[0][map_dim-1] = rand::thread_rng().gen_range((-(map_dim as f64))..=(map_dim as f64));
-    height_map[map_dim-1][0] = rand::thread_rng().gen_range((-(map_dim as f64))..=(map_dim as f64));
-    height_map[map_dim-1][map_dim-1] = rand::thread_rng().gen_range((-(map_dim as f64))..=(map_dim as f64));
+    height_map[(0, 0)] = rng.gen_range((-(map_dim as f64))..=(map_dim as f64));
+    height_map[(0, map_dim-1)] = rng.gen_range((-(map_dim as f64))..=(map_dim as f64));
+    height_map[(map_dim-1, 0)] = rng.gen_range((-(map_dim as f64))..=(map_dim as f64));
+    height_map[(map_dim-1, map_dim-1)] = rng.gen_range((-(map_dim as f64))..=(map_dim as f64));
 
     let mut diamond_square_queue: VecDeque<(i32, i32, i32)> = VecDeque::new();
     diamond_square_queue.push_back((0, 0, map_dim as i32 - 1));
     let end_step = 2;
     while let Some((i, j, s)) = diamond_square_queue.pop_front() {
         // Diamant
-        let rand_add = rand::thread_rng().gen_range((-(s as f64))..=(s as f64));
-        let mean = (height_map[i as usize][j as usize] + height_map[i as usize][(j+s) as usize] + height_map[(i+s) as usize][j as usize] + height_map[(i+s) as usize][(j+s) as usize]) / 4.0;
-        height_map[(i+s/2) as usize][(j+s/2) as usize] = mean + rand_add;
+        let rand_add = rng.gen_range((-(s as f64))..=(s as f64));
+        let mean = (height_map[(i as usize, j as usize)] + height_map[(i as usize, (j+s) as usize)] + height_map[((i+s) as usize, j as usize)] + height_map[((i+s) as usize, (j+s) as usize)]) / 4.0;
+        height_map[((i+s/2) as usize, (j+s/2) as usize)] = mean + rand_add;
 
         // Carré
         let offsets_to_find_square_points = [(0, s/2), (s/2, 0), (s, s/2), (s/2, s)];
@@ -85,12 +147,12 @@ fn diamond_square(n: u32, normalize: bool) -> Vec<Vec<f64>> {
                 let (dpi, dpj) = (pi + odpi, pj + odpj);
                 if dpi >= 0 && dpi < map_dim as i32 && dpj >= 0 && dpj < map_dim as i32 {
                     value_num += 1;
-                    value_sum += height_map[dpi as usize][dpj as usize];
+                    value_sum += height_map[(dpi as usize, dpj as usize)];
                 }
             }
 
-            let rand_add = rand::thread_rng().gen_range((-(s as f64))..=(s as f64));
-            height_map[pi as usize][pj as usize] = ((value_sum as f64) / (value_num as f64)) + rand_add;
+            let rand_add = rng.gen_range((-(s as f64))..=(s as f64));
+            height_map[(pi as usize, pj as usize)] = ((value_sum as f64) / (value_num as f64)) + rand_add;
         }
 
         // Population de la file d'attente
@@ -104,26 +166,15 @@ fn diamond_square(n: u32, normalize: bool) -> Vec<Vec<f64>> {
 
     // Normalisation de la carte de hauteur
     if normalize {
-        let mut min = 10.0 * map_dim as f64;
-        let mut max = -10.0 * map_dim as f64;
-        for h in height_map.iter().flat_map(|r| r.iter()) {
+        let mut min = 100.0 * map_dim as f64;
+        let mut max = -100.0 * map_dim as f64;
+        for h in height_map.map.iter() {
             if *h < min {min = *h;}
             if *h > max {max = *h;}
         }
 
-        println!("Min = {}, Max = {}", min, max);
-
-        for i in 0..map_dim {
-            for j in 0..map_dim {
-                height_map[i][j] = (height_map[i][j] - min) / (max - min);
-            }
-        }
-
-        let mut min = 3.0 * map_dim as f64;
-        let mut max = -3.0 * map_dim as f64;
-        for h in height_map.iter().flat_map(|r| r.iter()) {
-            if *h < min {min = *h;}
-            if *h > max {max = *h;}
+        for h in height_map.map.iter_mut() {
+            *h = (*h - min) / (max - min);
         }
     }
 
@@ -136,10 +187,8 @@ pub struct Game {
     // OpenGL drawing backend
     gl: Option<GlGraphics>,
 
-    // Defined colors
-    background_color: [f32; 4], // Color of the background
+    background_color: [f32; 4],
     grid_line_color: [f32; 4],
-    players_color: [[f32; 4]; 2],
     reachable_cell_color_mask: [f32; 4],
 
     view_in_window_x: f64,
@@ -159,17 +208,24 @@ pub struct Game {
 
     // Game variables
     unit_default_speed: i32,
+    player_num: usize,
+
+    // Player vector
+    players: Vec<Player>,
+
+    // Building map (hold Unit for each position in the map
+    building_map: Map<Option<Building>>,
 
     // Unit map (hold Unit for each position in the map
-    unit_map: Vec<Vec<Option<Unit>>>,
+    unit_map: Map<Option<Unit>>,
 
     // Height map
-    height_map: Vec<Vec<f64>>,
+    height_map: Map<f64>,
 
     color_ramp_value: Vec<f64>,
     color_ramp_color: Vec<[f32; 4]>,
 
-    active_player: u8,
+    active_player: usize,
     active_unit_position: Option<[usize; 2]>,
     last_mouse_position: Option<[f64; 2]>,
 
@@ -178,31 +234,51 @@ pub struct Game {
 }
 
 impl Game {
+
+    // Init game
     fn init(&mut self) {
         self.map_size = (2 as usize).pow(4+self.map_size_level)+1;
 
-        // Initialize unit map with None
-        self.unit_map = Vec::with_capacity(self.map_size);
-        for i in 0..(self.map_size) {
-            self.unit_map.push(Vec::with_capacity(self.map_size));
-            for _ in 0..(self.map_size) {
-                self.unit_map[i].push(None);
-            }
-        }
+        // Initialize unit map and building map with None
+        self.unit_map = Map::<Option<Unit>>::new(self.map_size, self.map_size, Option::<Unit>::None);
+        self.building_map = Map::<Option<Building>>::new(self.map_size, self.map_size, Option::<Building>::None);
 
         // Initialize height map with random height value [0, 1]
         let mut rng = rand::thread_rng();
-        self.height_map = Vec::with_capacity(self.map_size);
+        self.height_map = Map::<f64>::new(self.map_size, self.map_size, 0.0);
         for i in 0..(self.map_size) {
-            self.height_map.push(Vec::with_capacity(self.map_size));
-            for _ in 0..(self.map_size) {
-                self.height_map[i].push(rng.gen());
+            for j in 0..(self.map_size) {
+                self.height_map[(i, j)] = rng.gen();
             }
         }
         self.height_map = diamond_square(self.map_size_level, true);
 
+        // Initialize players 
+        // TODO : Initialize base position for all players with clever algorithm
+        self.players = Vec::<Player>::new();
+        self.players.push(Player::new([0, 0], [1.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]));
+        self.players.push(Player::new([self.map_size - 1, self.map_size - 1], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
+
         // Let the first player be the current active player
         self.active_player = 0;
+
+        // Add "base" buildings
+        let mut buildings_to_add = Vec::new();
+        buildings_to_add.push(Building {
+            player: 0,
+            position: [0, 0],
+            damage: 0,
+            health: 1
+        });
+        buildings_to_add.push(Building {
+            player: 1,
+            position: [self.map_size - 1, self.map_size - 1],
+            damage: 0,
+            health: 1
+        });
+        for building in buildings_to_add.drain(..) {
+            self.building_map[(building.position[0], building.position[1])] = Some(building);
+        }
 
         // Add first units
         let mut units_to_add = Vec::new();
@@ -233,8 +309,14 @@ impl Game {
 
         // Add units to unit map 
         for unit in units_to_add.drain(..) {
-            self.unit_map[unit.position[0]][unit.position[1]] = Some(unit);
+            self.unit_map[(unit.position[0], unit.position[1])] = Some(unit);
         }
+
+        // Look at active player base position
+        let active_player_base_position = self.players[self.active_player].base_position;
+        self.view_in_map_width = 32.0;
+        self.view_in_map_height = 32.0;
+        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
     }
 
     // Utility functions
@@ -290,6 +372,38 @@ impl Game {
         return [0., 0., 0., 0.];
     }
 
+    // Gameplay functions
+    fn turn(&mut self) {
+        for unit in self.unit_map.map.iter_mut() {
+            if let Some(unit) = unit {
+                unit.remaining_moves = unit.speed;
+            }
+        }
+
+        // Change active player and reset active unit position
+        self.active_player = (self.active_player + 1) % self.player_num;
+        let active_player_base_position = self.players[self.active_player].base_position;
+        self.view_in_map_width = 32.0;
+        self.view_in_map_height = 32.0;
+        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+        self.active_unit_position = None;
+    }
+
+    // View-related functions
+    fn look_at(&mut self, pos: [f64; 2]) {
+        println!("{}", "azea");
+        // Extract grid coordinates
+        let (i, j) = (pos[0], pos[1]);
+
+        // Clip coordinates
+        let i = i.min(self.map_size as f64).max(0.0);
+        let j = j.min(self.map_size as f64).max(0.0);
+
+        // Shift view to look at specified grid position
+        self.view_in_map_i = i - self.view_in_map_height / 2.0;
+        self.view_in_map_j = j - self.view_in_map_width / 2.0;
+    }
+
     // Event and Update methods
     fn process_event(&mut self, event: Event) {
         // Get the latest mouse position
@@ -314,20 +428,6 @@ impl Game {
                 else {
                     self.pressed_grid_cell = None;
                 }
-            }
-
-            // Right mouse button pressed
-            if mouse_button == MouseButton::Right {
-                // DO Turn Rollover (Reset moves of other player unit) -- TODO Make a function turn_rollover
-                for unit in self.unit_map.iter_mut().flat_map(|unit_row| unit_row.iter_mut()) {
-                    if let Some(unit) = unit {
-                        unit.remaining_moves = unit.speed;
-                    }
-                }
-
-                // Change active player and reset active unit position
-                self.active_player = 1 - self.active_player;
-                self.active_unit_position = None;
             }
         }
 
@@ -356,9 +456,9 @@ impl Game {
 
                         // Check if there is an active unit
                         if let Some(active_unit_position) = self.active_unit_position {
-                            if let Some(active_unit) = &self.unit_map[active_unit_position[0]][active_unit_position[1]] {
+                            if let Some(active_unit) = &self.unit_map[(active_unit_position[0], active_unit_position[1])] {
                                 println!("... while having active unit : {:?} ...", active_unit);
-                                if let Some(underlying_unit) = &self.unit_map[released_grid_cell[0]][released_grid_cell[1]] {
+                                if let Some(underlying_unit) = &self.unit_map[(released_grid_cell[0], released_grid_cell[1])] {
                                     println!("... and clicking on unit : {:?}", underlying_unit);
                                     // Same unit --> Deactivation of unit
                                     if underlying_unit == active_unit {
@@ -381,11 +481,11 @@ impl Game {
                                     let d = (released_grid_cell[0] as i32 - active_unit_position[0] as i32).abs() + (released_grid_cell[1] as i32 - active_unit_position[1] as i32).abs();
                                     if d <= active_unit.remaining_moves as i32 {
                                         // Make the moves
-                                        self.unit_map[released_grid_cell[0]][released_grid_cell[1]] = self.unit_map[active_unit_position[0]][active_unit_position[1]];
-                                        self.unit_map[active_unit_position[0]][active_unit_position[1]] = None;
+                                        self.unit_map[(released_grid_cell[0], released_grid_cell[1])] = self.unit_map[(active_unit_position[0], active_unit_position[1])];
+                                        self.unit_map[(active_unit_position[0], active_unit_position[1])] = None;
 
                                         // Update active unit remaining moves and position
-                                        if let Some(active_unit) = &mut self.unit_map[released_grid_cell[0]][released_grid_cell[1]] {
+                                        if let Some(active_unit) = &mut self.unit_map[(released_grid_cell[0], released_grid_cell[1])] {
                                             active_unit.remaining_moves -= d;
                                             active_unit.position = released_grid_cell;
                                         }
@@ -400,7 +500,7 @@ impl Game {
                         // No active unit 
                         else {
                             // Activation underlying unit
-                            if let Some(underlying_unit) = &self.unit_map[released_grid_cell[0]][released_grid_cell[1]] {
+                            if let Some(underlying_unit) = &self.unit_map[(released_grid_cell[0], released_grid_cell[1])] {
                                 println!("Click on unit : {:?}", underlying_unit);
                                 if underlying_unit.player == self.active_player {
                                     self.active_unit_position = Some(underlying_unit.position);
@@ -415,21 +515,31 @@ impl Game {
         }
 
         if let Some(Button::Keyboard(key)) = event.press_args() {
-            let view_move: f64 = 10.0;
+            let view_move_in_view_size_ratio: f64 = 0.1;
+            let view_move_i = self.view_in_map_height * view_move_in_view_size_ratio;
+            let view_move_j = self.view_in_map_width * view_move_in_view_size_ratio;
             let n: f64 = 2.0;
             match key {
                 Key::Up => {
-                    self.view_in_map_i = (self.view_in_map_i - view_move).max(-self.view_in_map_height / n);
+                    self.view_in_map_i = (self.view_in_map_i - view_move_i).max(-self.view_in_map_height / n);
                 },
                 Key::Down => {
-                    self.view_in_map_i = (self.view_in_map_i + view_move).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
+                    self.view_in_map_i = (self.view_in_map_i + view_move_i).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
                 },
                 Key::Left => {
-                    self.view_in_map_j = (self.view_in_map_j - view_move).max(-self.view_in_map_width / n);
+                    self.view_in_map_j = (self.view_in_map_j - view_move_j).max(-self.view_in_map_width / n);
                 },
                 Key::Right => {
-                    self.view_in_map_j = (self.view_in_map_j + view_move).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
+                    self.view_in_map_j = (self.view_in_map_j + view_move_j).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
                 },
+                Key::Space => {
+                    self.turn();
+                },
+                Key::R => {
+                    self.view_in_map_width = self.map_size as f64;
+                    self.view_in_map_height = self.map_size as f64;
+                    self.look_at([self.map_size as f64 / 2.0, self.map_size as f64 / 2.0]);
+                }
                 _ => {}
             }
         }
@@ -485,7 +595,7 @@ impl Game {
                 let transform = c.transform.trans(x, y);
 
                 // Draw each grid cell
-                rectangle(self.h_to_color(self.height_map[i as usize][j as usize], false), cell, transform, self.gl.as_mut().unwrap());
+                rectangle(self.h_to_color(self.height_map[(i as usize, j as usize)], false), cell, transform, self.gl.as_mut().unwrap());
             }
         }
 
@@ -531,7 +641,7 @@ impl Game {
     fn render_unit_reachable_cells(&mut self, c: Context) {
         // Draw reachable mask at reachable cells by active unit if there is an active one
         if let Some(active_unit_position) = self.active_unit_position {
-            if let Some(active_unit) = &self.unit_map[active_unit_position[0]][active_unit_position[1]] {
+            if let Some(active_unit) = &self.unit_map[(active_unit_position[0], active_unit_position[1])] {
                 // Compute cell dimensions in pixel and define reachable mask shape
                 let (cell_pix_width, cell_pix_height) = self.cell_pixel();
                 let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
@@ -539,10 +649,10 @@ impl Game {
 
                 // Draw each reachable cell by active unit
                 let (pi, pj) = (active_unit_position[0] as i32, active_unit_position[1] as i32);
-                let (ibeg, iend) = (std::cmp::max(pi - active_unit.remaining_moves, view_in_map_i1), std::cmp::min(pi + active_unit.remaining_moves, view_in_map_i2) + 1);
-                let (jbeg, jend) = (std::cmp::max(pj - active_unit.remaining_moves, view_in_map_j1), std::cmp::min(pj + active_unit.remaining_moves, view_in_map_j2) + 1);
-                for i in ibeg..iend {
-                    for j in jbeg..jend {
+                let (ibeg, iend) = (std::cmp::max(pi - active_unit.remaining_moves, view_in_map_i1), std::cmp::min(pi + active_unit.remaining_moves, view_in_map_i2-1));
+                let (jbeg, jend) = (std::cmp::max(pj - active_unit.remaining_moves, view_in_map_j1), std::cmp::min(pj + active_unit.remaining_moves, view_in_map_j2-1));
+                for i in ibeg..=iend {
+                    for j in jbeg..=jend {
                         let d = (pi - i).abs() + (pj - j).abs();
                         if d <= active_unit.remaining_moves && d > 0 {
                             let transform = c.transform.trans(self.j_to_x(j), self.i_to_y(i));
@@ -554,26 +664,83 @@ impl Game {
         }
     }
 
-    fn render_unit(&mut self, c: Context) {
+    fn render_buildings(&mut self, c: Context) {
         // Compute cell dimensions in pixel and define reachable mask shape
         let (cell_pix_width, cell_pix_height) = self.cell_pixel();
         let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
 
-        let unit_shape =
-            rectangle_by_corners(
-                cell_pix_width / 16.0, cell_pix_height / 16.0,
-                cell_pix_width - cell_pix_width / 16.0 + 1.0,
-                cell_pix_height - cell_pix_height / 16.0 + 1.0
-            );
+        let cell_padding_ratio = 1.0 / 8.0;
+        let building_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
+        let building_pix_height = cell_pix_height * (1.0 - cell_padding_ratio * 2.0);
+        let rectangle = [
+            cell_pix_width * cell_padding_ratio, cell_pix_height * cell_padding_ratio, 
+            building_pix_width, building_pix_height
+        ];
+        let border_padding_ratio = 1.0 / 10.0;
+        let building_rectangle = Rectangle {
+            color: [1.0, 1.0, 1.0, 1.0],
+            shape: graphics::rectangle::Shape::Square,
+            border: Some(graphics::rectangle::Border {
+                color: [0.0, 0.0, 0.0, 1.0],
+                radius: (building_pix_width / 2.0) * border_padding_ratio
+            })
+        };
 
         // Draw units
         for i in view_in_map_i1..view_in_map_i2 {
             for j in view_in_map_j1..view_in_map_j2 {
-                if let Some(unit) = &self.unit_map[i as usize][j as usize] {
-                    ellipse(
-                        self.players_color[unit.player as usize], unit_shape, 
-                        c.transform.trans(self.j_to_x(j), self.i_to_y(i)), self.gl.as_mut().unwrap()
-                    );
+                if let Some(building) = &self.building_map[(i as usize, j as usize)] {
+                    building_rectangle
+                        .color(self.players[building.player].principal_color)
+                        .border(graphics::rectangle::Border {
+                            color: self.players[building.player].secondary_color,
+                            radius: (building_pix_width / 2.0) * border_padding_ratio})
+                        .draw(
+                            rectangle, 
+                            &draw_state::DrawState::default(), 
+                            c.transform.trans(self.j_to_x(j), self.i_to_y(i)), 
+                            self.gl.as_mut().unwrap()
+                        );
+                }
+            }
+        }
+    }
+
+    fn render_units(&mut self, c: Context) {
+        // Compute cell dimensions in pixel and define reachable mask shape
+        let (cell_pix_width, cell_pix_height) = self.cell_pixel();
+        let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
+
+        let cell_padding_ratio = 1.0 / 8.0;
+        let unit_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
+        let unit_pix_height = cell_pix_height * (1.0 - cell_padding_ratio * 2.0);
+        let rectangle = [
+            cell_pix_width * cell_padding_ratio, cell_pix_height * cell_padding_ratio, 
+            unit_pix_width, unit_pix_height
+        ];
+        let border_padding_ratio = 1.0 / 10.0;
+        let unit_ellipse = Ellipse {
+            color: [1.0, 1.0, 1.0, 1.0],
+            border: Some(graphics::ellipse::Border {
+                color: [1.0, 1.0, 1.0, 1.0],
+                radius: (unit_pix_width / 2.0) * border_padding_ratio
+            }),
+            resolution: 32
+        };
+
+        // Draw units
+        for i in view_in_map_i1..view_in_map_i2 {
+            for j in view_in_map_j1..view_in_map_j2 {
+                if let Some(unit) = &self.unit_map[(i as usize, j as usize)] {
+                    unit_ellipse
+                        .color(self.players[unit.player].principal_color)
+                        .border(graphics::ellipse::Border {
+                            color: self.players[unit.player].secondary_color,
+                            radius: (unit_pix_width / 2.0) * border_padding_ratio})
+                        .draw(
+                            rectangle, &draw_state::DrawState::default(), 
+                            c.transform.trans(self.j_to_x(j), self.i_to_y(i)), self.gl.as_mut().unwrap()
+                        );
                 }
             }
         }
@@ -595,31 +762,32 @@ impl Game {
         // Render reachable cell by active unit
         self.render_unit_reachable_cells(c);
 
-        // Render units
-        self.render_unit(c);
+        // Render units and buildings
+        self.render_buildings(c);
+        self.render_units(c);
 
         // End the drawing pipeline
         self.gl.as_mut().unwrap().draw_end();
     }
 }
 
-
 fn main_game() {
     // Define OpenGL version we use
     let opengl = OpenGL::V4_5;
 
     // Create an Glutin window.
-    let window_width = 800.0;
-    let window_height = 800.0;
+    let window_width = 1600.0;
+    let window_height = 900.0;
     let mut window: Window = WindowSettings::new("strategy game", [window_width, window_height])
         .graphics_api(opengl)
         .exit_on_esc(true)
         .resizable(false)
+        .samples(8)
         .build()
         .unwrap();
 
     // Create a new game instance and run it.
-    let map_size_level = 4;
+    let map_size_level = 3;
     let deep_water = 0.5;
     let soft_water = 0.05;
     let sand = 0.025;
@@ -630,7 +798,6 @@ fn main_game() {
         background_color: [0.0, 0.0, 0.0, 1.0],
 
         grid_line_color: [0.0, 0.0, 0.0, 1.0],
-        players_color: [[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]],
         reachable_cell_color_mask: [1.0, 0.0, 0.0, 0.15],
 
         view_in_window_x: 0.0,
@@ -648,6 +815,7 @@ fn main_game() {
         view_in_map_height: (2 as u32).pow(4+map_size_level) as f64+1.0,
 
         unit_default_speed: 3,
+        player_num: 2,
 
         active_unit_position: None,
 
@@ -656,7 +824,7 @@ fn main_game() {
             0.25, // Eau douce
             0.30, // Sable
             0.35, // Herbe
-            0.85, // Montagne
+            0.70, // Montagne
             0.95 // Neige
         ],
         // color_ramp_value: vec![0.0, 0.45, 0.75, 0.9625, 0.99],
@@ -681,7 +849,6 @@ fn main_game() {
         game.process_event(e);
     }
 }
-
 
 fn main() {
     main_game();
