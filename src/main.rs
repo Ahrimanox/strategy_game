@@ -213,11 +213,14 @@ pub struct Game {
     // Player vector
     players: Vec<Player>,
 
-    // Building map (hold Unit for each position in the map
+    // Building map (hold building for each position in the map
     building_map: Map<Option<Building>>,
 
     // Unit map (hold Unit for each position in the map
     unit_map: Map<Option<Unit>>,
+
+    // Territory map
+    territory_map: Map<Option<usize>>,
 
     // Height map
     height_map: Map<f64>,
@@ -240,8 +243,9 @@ impl Game {
         self.map_size = (2 as usize).pow(4+self.map_size_level)+1;
 
         // Initialize unit map and building map with None
-        self.unit_map = Map::<Option<Unit>>::new(self.map_size, self.map_size, Option::<Unit>::None);
-        self.building_map = Map::<Option<Building>>::new(self.map_size, self.map_size, Option::<Building>::None);
+        self.unit_map = Map::<Option<Unit>>::new(self.map_size, self.map_size, None);
+        self.building_map = Map::<Option<Building>>::new(self.map_size, self.map_size, None);
+        self.territory_map = Map::<Option<usize>>::new(self.map_size, self.map_size, None);
 
         // Initialize height map with random height value [0, 1]
         let mut rng = rand::thread_rng();
@@ -278,13 +282,14 @@ impl Game {
         });
         for building in buildings_to_add.drain(..) {
             self.building_map[(building.position[0], building.position[1])] = Some(building);
+            self.territory_map[(building.position[0], building.position[1])] = Some(building.player);
         }
 
         // Add first units
         let mut units_to_add = Vec::new();
         units_to_add.push(Unit {
             player: 0,
-            position: [0, 0],
+            position: [0, 1],
             damage: 1,
             health: 1,
             speed: self.unit_default_speed,
@@ -292,7 +297,7 @@ impl Game {
         });
         units_to_add.push(Unit {
             player: 0,
-            position: [3, 3],
+            position: [1, 0],
             damage: 1,
             health: 1,
             speed: self.unit_default_speed,
@@ -300,7 +305,15 @@ impl Game {
         });
         units_to_add.push(Unit {
             player: 1,
-            position: [self.map_size - 1, self.map_size - 1],
+            position: [self.map_size - 1, self.map_size - 2],
+            damage: 1,
+            health: 1,
+            speed: self.unit_default_speed,
+            remaining_moves: self.unit_default_speed
+        });
+        units_to_add.push(Unit {
+            player: 1,
+            position: [self.map_size - 2, self.map_size - 1],
             damage: 1,
             health: 1,
             speed: self.unit_default_speed,
@@ -310,6 +323,7 @@ impl Game {
         // Add units to unit map 
         for unit in units_to_add.drain(..) {
             self.unit_map[(unit.position[0], unit.position[1])] = Some(unit);
+            self.territory_map[(unit.position[0], unit.position[1])] = Some(unit.player);
         }
 
         // Look at active player base position
@@ -391,7 +405,6 @@ impl Game {
 
     // View-related functions
     fn look_at(&mut self, pos: [f64; 2]) {
-        println!("{}", "azea");
         // Extract grid coordinates
         let (i, j) = (pos[0], pos[1]);
 
@@ -488,6 +501,7 @@ impl Game {
                                         if let Some(active_unit) = &mut self.unit_map[(released_grid_cell[0], released_grid_cell[1])] {
                                             active_unit.remaining_moves -= d;
                                             active_unit.position = released_grid_cell;
+                                            self.territory_map[(released_grid_cell[0], released_grid_cell[1])] = Some(active_unit.player);
                                         }
 
                                         // Update active unit positition
@@ -520,16 +534,16 @@ impl Game {
             let view_move_j = self.view_in_map_width * view_move_in_view_size_ratio;
             let n: f64 = 2.0;
             match key {
-                Key::Up => {
+                Key::Up | Key::Z => {
                     self.view_in_map_i = (self.view_in_map_i - view_move_i).max(-self.view_in_map_height / n);
                 },
-                Key::Down => {
+                Key::Down | Key::S => {
                     self.view_in_map_i = (self.view_in_map_i + view_move_i).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
                 },
-                Key::Left => {
+                Key::Left | Key::Q => {
                     self.view_in_map_j = (self.view_in_map_j - view_move_j).max(-self.view_in_map_width / n);
                 },
-                Key::Right => {
+                Key::Right | Key::D => {
                     self.view_in_map_j = (self.view_in_map_j + view_move_j).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
                 },
                 Key::Space => {
@@ -665,7 +679,7 @@ impl Game {
     }
 
     fn render_buildings(&mut self, c: Context) {
-        // Compute cell dimensions in pixel and define reachable mask shape
+        // Compute cell dimensions in pixel
         let (cell_pix_width, cell_pix_height) = self.cell_pixel();
         let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
 
@@ -746,6 +760,47 @@ impl Game {
         }
     }
 
+    fn render_territory(&mut self, c: Context) {
+        // Compute cell dimensions in pixel
+        let (cell_pix_width, cell_pix_height) = self.cell_pixel();
+        let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
+
+        let territorry_cell_width = cell_pix_width;
+        let territorry_cell_height = cell_pix_height;
+        let border_padding_ratio = 1.0 / 32.0;
+        let outline_radius = territorry_cell_height * border_padding_ratio;
+        let rectangle = [outline_radius, outline_radius, territorry_cell_width - 2.0*outline_radius, territorry_cell_height - 2.0*outline_radius];
+        let territory_mask_rectangle = Rectangle {
+            color: [0.0, 0.0, 0.0, 0.0],
+            // shape: graphics::rectangle::Shape::Square,
+            shape: graphics::rectangle::Shape::Round(outline_radius, 32),
+            border: Some(graphics::rectangle::Border {
+                color: [0.0, 0.0, 0.0, 1.0],
+                radius: 0.0
+            })
+        };
+
+        // Draw units
+        for i in view_in_map_i1..view_in_map_i2 {
+            for j in view_in_map_j1..view_in_map_j2 {
+                if let Some(player) = &self.territory_map[(i as usize, j as usize)] {
+                    let mut territory_mask_color = self.players[*player].principal_color;
+                    territory_mask_color[3] = 0.8;
+                    territory_mask_rectangle
+                        .border(graphics::rectangle::Border {
+                            color: territory_mask_color,
+                            radius: outline_radius})
+                        .draw(
+                            rectangle, 
+                            &draw_state::DrawState::default(), 
+                            c.transform.trans(self.j_to_x(j), self.i_to_y(i)), 
+                            self.gl.as_mut().unwrap()
+                        );
+                }
+            }
+        }
+    }
+
     fn render(&mut self, args: &RenderArgs) {
         // Background color
         let background_color = self.background_color;
@@ -758,6 +813,9 @@ impl Game {
 
         // Render grid
         self.render_grid(c, false);
+
+        // Render territory
+        self.render_territory(c);
 
         // Render reachable cell by active unit
         self.render_unit_reachable_cells(c);
