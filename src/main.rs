@@ -8,6 +8,8 @@ use opengl_graphics::{GlGraphics, OpenGL, TextureSettings, Filter, GlyphCache};
 use piston::event_loop::{EventSettings, Events};
 use piston::window::WindowSettings;
 
+mod distance;
+mod path_planning;
 mod map;
 mod player;
 mod game;
@@ -91,5 +93,6 @@ fn main_game() {
 }
 
 fn main() {
+    // Launch game
     main_game();
 }
