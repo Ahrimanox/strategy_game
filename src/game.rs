@@ -174,8 +174,9 @@ impl Game<'_> {
     }
 
     fn visible_map_bounds(&self) -> (i32, i32, i32, i32) {
-        (std::cmp::max(self.view_in_map_i.floor() as i32, 0), std::cmp::min((self.view_in_map_i + self.view_in_map_height).ceil() as i32, self.map_size as i32), 
-        std::cmp::max(self.view_in_map_j.floor() as i32, 0), std::cmp::min((self.view_in_map_j + self.view_in_map_width).ceil() as i32, self.map_size as i32))
+        (std::cmp::max(self.view_in_map_i.floor() as i32, 0), std::cmp::max(self.view_in_map_j.floor() as i32, 0),
+        std::cmp::min((self.view_in_map_i + self.view_in_map_height).ceil() as i32, self.map_size as i32), 
+        std::cmp::min((self.view_in_map_j + self.view_in_map_width).ceil() as i32, self.map_size as i32))
     }
 
     fn i_to_y(&self, i: i32) -> f64 {
@@ -200,22 +201,26 @@ impl Game<'_> {
         (x, y)
     }
 
+    fn is_in_rect<T: PartialOrd>(&self, position: (T, T), rect: (T, T, T, T)) -> bool {
+        let (x, y) = position;
+        let (x0, y0, x1, y1) = rect;
+        if x > x1 {return false;}
+        else if x < x0 {return false;}
+        else if y > y1 {return false;}
+        else if y < y0 {return false;}
+        else {return true;}
+    }
+
     fn is_in_window(&self, window_position: (f64, f64)) -> bool {
         let (x, y) = window_position;
-        if x > self.map_size as f64 {return false;}
-        else if x < 0.0 {return false;}
-        else if y > self.map_size as f64 {return false;}
-        else if y < 0.0 {return false;}
-        else {return true;}
+        let window_rect = (0.0, 0.0, self.map_size as f64, self.map_size as f64);
+        self.is_in_rect((x, y), window_rect)
     }
 
     fn is_in_map(&self, map_position: (i32, i32)) -> bool {
         let (i, j) = map_position;
-        if i > self.map_size as i32 {return false;}
-        else if i < 0 {return false;}
-        else if j > self.map_size as i32 {return false;}
-        else if j < 0 {return false;}
-        else {return true;}
+        let map_rect = (0, 0, self.map_size as i32, self.map_size as i32);
+        self.is_in_rect((i, j), map_rect)
     }
 
     fn h_to_color(&self, h: f64, interpolate: bool) -> [f32; 4] {
@@ -483,7 +488,7 @@ impl Game<'_> {
         let (cell_pix_width, cell_pix_height) = self.cell_pixel();
         let cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
 
-        let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
+        let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = self.visible_map_bounds();
 
         for i in view_in_map_i1..view_in_map_i2 {
             let y = self.i_to_y(i);
@@ -542,7 +547,7 @@ impl Game<'_> {
                 // Compute cell dimensions in pixel and define reachable mask shape
                 let (cell_pix_width, cell_pix_height) = self.cell_pixel();
                 let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
-                let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
+                let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = self.visible_map_bounds();
 
                 // Draw each reachable cell by active unit
                 let (pi, pj) = (active_unit_position[0] as i32, active_unit_position[1] as i32);
@@ -564,7 +569,7 @@ impl Game<'_> {
     fn render_buildings(&mut self, c: Context) {
         // Compute cell dimensions in pixel
         let (cell_pix_width, cell_pix_height) = self.cell_pixel();
-        let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
+        let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = self.visible_map_bounds();
 
         let cell_padding_ratio = 1.0 / 4.0;
         let building_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
@@ -604,9 +609,10 @@ impl Game<'_> {
     }
 
     fn render_units(&mut self, c: Context) {
-        // Compute cell dimensions in pixel and define reachable mask shape
+        // Compute cell dimensions in pixel and compute visible map bounds
         let (cell_pix_width, cell_pix_height) = self.cell_pixel();
-        let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
+        let visible_map_bounds = self.visible_map_bounds();
+        let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = visible_map_bounds;
 
         let cell_padding_ratio = 1.0 / 4.0;
         let unit_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
@@ -629,6 +635,7 @@ impl Game<'_> {
         for i in view_in_map_i1..view_in_map_i2 {
             for j in view_in_map_j1..view_in_map_j2 {
                 if let Some(unit) = &self.unit_map[(i as usize, j as usize)] {
+                    let (x, y) = self.map_position_to_window_position((i, j));
                     unit_ellipse
                         .color(self.players[unit.player].principal_color)
                         .border(graphics::ellipse::Border {
@@ -636,9 +643,33 @@ impl Game<'_> {
                             radius: (unit_pix_width / 2.0) * border_padding_ratio})
                         .draw(
                             rectangle, &draw_state::DrawState::default(), 
-                            c.transform.trans(self.j_to_x(j), self.i_to_y(i)), self.gl.as_mut().unwrap()
+                            c.transform.trans(x, y), self.gl.as_mut().unwrap()
                         );
                 }
+            }
+        }
+
+        // Draw marker on active unit if there is one and if it is visible
+        if let Some(active_unit_position) = self.active_unit_position {
+            if self.is_in_rect((active_unit_position[0] as i32, active_unit_position[1] as i32), visible_map_bounds) {
+                let cell_padding_ratio = 1.0 / 2.5;
+                let marker_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
+                let marker_pix_height = cell_pix_height * (1.0 - cell_padding_ratio * 2.0);
+                let rectangle = [
+                    cell_pix_width * cell_padding_ratio, cell_pix_height * cell_padding_ratio, 
+                    marker_pix_width, marker_pix_height
+                ];
+                let active_unit_marker = Ellipse {
+                    color: [0.0, 0.0, 0.0, 1.0],
+                    border: None,
+                    resolution: 32
+                };
+                let (x, y) = self.map_position_to_window_position((active_unit_position[0] as i32, active_unit_position[1] as i32));
+
+                active_unit_marker.draw(
+                    rectangle, &draw_state::DrawState::default(), 
+                    c.transform.trans(x, y), self.gl.as_mut().unwrap()
+                );
             }
         }
     }
@@ -646,7 +677,7 @@ impl Game<'_> {
     fn render_territory(&mut self, c: Context) {
         // Compute cell dimensions in pixel
         let (cell_pix_width, cell_pix_height) = self.cell_pixel();
-        let (view_in_map_i1, view_in_map_i2, view_in_map_j1, view_in_map_j2) = self.visible_map_bounds();
+        let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = self.visible_map_bounds();
         let font_size = (cell_pix_height / 4.0).floor() as u32;
 
         for i in view_in_map_i1..view_in_map_i2 {
