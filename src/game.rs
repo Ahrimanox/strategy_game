@@ -66,10 +66,10 @@ pub struct Game<'a> {
 
     pub active_player: usize,
     pub active_unit_position: Option<[usize; 2]>,
-    pub last_mouse_position: Option<[f64; 2]>,
+    pub latest_mouse_position: Option<[f64; 2]>,
 
-    pub pressed_grid_cell: Option<[usize; 2]>,
-    pub released_grid_cell: Option<[usize; 2]>,
+    pub pressed_map_cell: Option<[usize; 2]>,
+    pub released_map_cell: Option<[usize; 2]>,
 }
 
 impl Game<'_> {
@@ -186,6 +186,38 @@ impl Game<'_> {
         ((j as f64 - self.view_in_map_j) / self.view_in_map_width) * self.view_in_window_width + self.view_in_window_x
     }
 
+    fn window_position_to_map_position(&self, window_position: (f64, f64)) -> (i32, i32) {
+        let (x, y) = window_position;
+        let i = (((y - self.view_in_window_y) / self.view_in_window_height) * self.view_in_map_height as f64 + self.view_in_map_i as f64) as i32;
+        let j = (((x - self.view_in_window_x) / self.view_in_window_width) * self.view_in_map_width as f64 + self.view_in_map_j as f64) as i32;
+        (i, j)
+    }
+
+    fn map_position_to_window_position(&self, map_position: (i32, i32)) -> (f64, f64) {
+        let (i, j) = map_position;
+        let x = ((j as f64 - self.view_in_map_j) / self.view_in_map_width) * self.view_in_window_width + self.view_in_window_x;
+        let y = ((i as f64 - self.view_in_map_i) / self.view_in_map_height) * self.view_in_window_height + self.view_in_window_y;
+        (x, y)
+    }
+
+    fn is_in_window(&self, window_position: (f64, f64)) -> bool {
+        let (x, y) = window_position;
+        if x > self.map_size as f64 {return false;}
+        else if x < 0.0 {return false;}
+        else if y > self.map_size as f64 {return false;}
+        else if y < 0.0 {return false;}
+        else {return true;}
+    }
+
+    fn is_in_map(&self, map_position: (i32, i32)) -> bool {
+        let (i, j) = map_position;
+        if i > self.map_size as i32 {return false;}
+        else if i < 0 {return false;}
+        else if j > self.map_size as i32 {return false;}
+        else if j < 0 {return false;}
+        else {return true;}
+    }
+
     fn h_to_color(&self, h: f64, interpolate: bool) -> [f32; 4] {
         if h < self.color_ramp_value[0] {
             return self.color_ramp_color[0];
@@ -232,10 +264,22 @@ impl Game<'_> {
         // Change active player and reset active unit position
         self.active_player = (self.active_player + 1) % self.player_num;
         let active_player_base_position = self.players[self.active_player].base_position;
-        // self.view_in_map_width = 16.0;
-        // self.view_in_map_height = 16.0;
-        // self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+        self.view_in_map_width = 16.0;
+        self.view_in_map_height = 16.0;
+        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
         self.active_unit_position = None;
+    }
+
+    fn deactivate_active_unit(&mut self) {
+        self.active_unit_position = None;
+    }
+
+    fn activate_unit(&mut self, new_active_unit_position: [usize; 2]) {
+        // First deactivate active unit if there is one
+        self.deactivate_active_unit();
+
+        // Activate unit by storing its position
+        self.active_unit_position = Some(new_active_unit_position);
     }
 
     // View-related functions
@@ -256,62 +300,63 @@ impl Game<'_> {
     pub fn process_event(&mut self, event: Event) {
         // Get the latest mouse position
         if let Some(args) = event.mouse_cursor_args() {
-            self.last_mouse_position = Some(args);
+            self.latest_mouse_position = Some(args);
         }
 
         // Mouse button pressed
         if let Some(Button::Mouse(mouse_button)) = event.press_args() {
+            
             // Left mouse button pressed
             if mouse_button == MouseButton::Left {
-                let last_mouse_pos = self.last_mouse_position.unwrap();
+                let latest_mouse_pos = self.latest_mouse_position.unwrap();
 
-                // TODO : Make a function with that
-                let (mx, my) = (last_mouse_pos[0], last_mouse_pos[1]);
-                let mi = (((my - self.view_in_window_y) / self.view_in_window_height) * self.view_in_map_height as f64 + self.view_in_map_i as f64) as i32;
-                let mj = (((mx - self.view_in_window_x) / self.view_in_window_width) * self.view_in_map_width as f64 + self.view_in_map_j as f64) as i32;
+                let (mx, my) = (latest_mouse_pos[0], latest_mouse_pos[1]);
+                let (mi, mj) = self.window_position_to_map_position((mx, my));
 
-                if mi >= 0 && mi < self.map_size as i32 && mj >=0 && mj < self.map_size as i32 {
-                    self.pressed_grid_cell = Some([mi as usize, mj as usize]);
+                if self.is_in_map((mi, mj)) {
+                    self.pressed_map_cell = Some([mi as usize, mj as usize]);
                 }
                 else {
-                    self.pressed_grid_cell = None;
+                    self.pressed_map_cell = None;
                 }
             }
+
+            // Right mouse button pressed
+            // NOHTING
         }
 
         // Mouse button released
         if let Some(Button::Mouse(mouse_button)) = event.release_args() {
+            
             // Left mouse button released
             if mouse_button == MouseButton::Left {
-                let last_mouse_pos = self.last_mouse_position.unwrap();
+                let latest_mouse_position = self.latest_mouse_position.unwrap();
 
                 // TODO : Make a function with that
-                let (mx, my) = (last_mouse_pos[0], last_mouse_pos[1]);
-                let mi = (((my - self.view_in_window_y) / self.view_in_window_height) * self.view_in_map_height as f64 + self.view_in_map_i as f64) as i32;
-                let mj = (((mx - self.view_in_window_x) / self.view_in_window_width) * self.view_in_map_width as f64 + self.view_in_map_j as f64) as i32;
+                let (mx, my) = (latest_mouse_position[0], latest_mouse_position[1]);
+                let (mi, mj) = self.window_position_to_map_position((mx, my));
 
-                if mi >= 0 && mi < self.map_size as i32 && mj >=0 && mj < self.map_size as i32 {
-                    self.released_grid_cell = Some([mi as usize, mj as usize]);
+                if self.is_in_map((mi, mj)) {
+                    self.released_map_cell = Some([mi as usize, mj as usize]);
                 }
                 else {
-                    self.released_grid_cell = None;
+                    self.released_map_cell = None;
                 }
 
                 // Click event
-                if self.pressed_grid_cell == self.released_grid_cell {
-                    if let Some(released_grid_cell) = self.released_grid_cell {
-                        println!("Click on i={}, j={} ...", released_grid_cell[0], released_grid_cell[1]);
+                if self.pressed_map_cell == self.released_map_cell {
+                    if let Some(released_map_cell) = self.released_map_cell {
+                        println!("Click on i={}, j={} ...", released_map_cell[0], released_map_cell[1]);
 
                         // Check if there is an active unit
                         if let Some(active_unit_position) = self.active_unit_position {
                             if let Some(active_unit) = &self.unit_map[(active_unit_position[0], active_unit_position[1])] {
                                 println!("... while having active unit : {:?} ...", active_unit);
-                                if let Some(underlying_unit) = &self.unit_map[(released_grid_cell[0], released_grid_cell[1])] {
+                                if let Some(underlying_unit) = &self.unit_map[(released_map_cell[0], released_map_cell[1])] {
                                     println!("... and clicking on unit : {:?}", underlying_unit);
                                     // Same unit --> Deactivation of unit
                                     if underlying_unit == active_unit {
-                                        self.active_unit_position = None;
-                                        println!("Deactivation of unit : {:?}", underlying_unit);
+                                        self.deactivate_active_unit();
                                     }
                                     // Unit of other player --> Possible attacks
                                     else if active_unit.player != underlying_unit.player {
@@ -319,28 +364,27 @@ impl Game<'_> {
                                     }
                                     // Another unit of the same player --> Deactivation and Activation of other unit
                                     else {
-                                        println!("Deactivation of current active unit {:?} and activation of {:?}", active_unit, underlying_unit);
-                                        self.active_unit_position = Some(underlying_unit.position);
+                                        self.activate_unit(underlying_unit.position);
                                     }
                                 }
     
                                 // No underlying unit and active unit --> Possible moves
                                 else {
-                                    let d = (released_grid_cell[0] as i32 - active_unit_position[0] as i32).abs() + (released_grid_cell[1] as i32 - active_unit_position[1] as i32).abs();
+                                    let d = (released_map_cell[0] as i32 - active_unit_position[0] as i32).abs() + (released_map_cell[1] as i32 - active_unit_position[1] as i32).abs();
                                     if d <= active_unit.remaining_moves as i32 {
                                         // Make the moves
-                                        self.unit_map[(released_grid_cell[0], released_grid_cell[1])] = self.unit_map[(active_unit_position[0], active_unit_position[1])];
+                                        self.unit_map[(released_map_cell[0], released_map_cell[1])] = self.unit_map[(active_unit_position[0], active_unit_position[1])];
                                         self.unit_map[(active_unit_position[0], active_unit_position[1])] = None;
 
                                         // Update active unit remaining moves and position
-                                        if let Some(active_unit) = &mut self.unit_map[(released_grid_cell[0], released_grid_cell[1])] {
+                                        if let Some(active_unit) = &mut self.unit_map[(released_map_cell[0], released_map_cell[1])] {
                                             active_unit.remaining_moves -= d;
-                                            active_unit.position = released_grid_cell;
-                                            self.territory_map[(released_grid_cell[0], released_grid_cell[1])] = active_unit.player;
+                                            active_unit.position = released_map_cell;
+                                            self.territory_map[(released_map_cell[0], released_map_cell[1])] = active_unit.player;
                                         }
 
                                         // Update active unit positition
-                                        self.active_unit_position = Some(released_grid_cell);
+                                        self.active_unit_position = Some(released_map_cell);
                                     }
                                 }
                             }
@@ -349,7 +393,7 @@ impl Game<'_> {
                         // No active unit 
                         else {
                             // Activation underlying unit
-                            if let Some(underlying_unit) = &self.unit_map[(released_grid_cell[0], released_grid_cell[1])] {
+                            if let Some(underlying_unit) = &self.unit_map[(released_map_cell[0], released_map_cell[1])] {
                                 println!("Click on unit : {:?}", underlying_unit);
                                 if underlying_unit.player == self.active_player {
                                     self.active_unit_position = Some(underlying_unit.position);
@@ -359,10 +403,14 @@ impl Game<'_> {
                     }   
                 }
 
-                self.pressed_grid_cell = None;
+                self.pressed_map_cell = None;
             }
+
+            // Right mouse button released
+            // NOTHING
         }
 
+        // Keyboard button pressed
         if let Some(Button::Keyboard(key)) = event.press_args() {
             let view_move_in_view_size_ratio: f64 = 0.1;
             let view_move_i = self.view_in_map_height * view_move_in_view_size_ratio;
@@ -449,9 +497,9 @@ impl Game<'_> {
         }
 
         // Draw pressed grid cells
-        if let Some(pressed_grid_cell) = self.pressed_grid_cell {
-            let x = self.j_to_x(pressed_grid_cell[1] as i32);
-            let y = self.i_to_y(pressed_grid_cell[0] as i32);
+        if let Some(pressed_map_cell) = self.pressed_map_cell {
+            let x = self.j_to_x(pressed_map_cell[1] as i32);
+            let y = self.i_to_y(pressed_map_cell[0] as i32);
             let transform = c.transform.trans(x, y);
             rectangle([1.0, 0.0, 1.0, 1.0], cell, transform, self.gl.as_mut().unwrap());
         }
@@ -607,17 +655,16 @@ impl Game<'_> {
                 if player < self.player_num {
                     // Get principal and secondary colors for drawing player text
                     let principal_color = self.players[player].principal_color;
-                    let secondary_color = self.players[player].secondary_color;
+                    let _secondary_color = self.players[player].secondary_color;
                     let player_text = Text {
                         color: principal_color,
                         font_size: font_size,
                         round: false
                     };
 
-                    let x = self.j_to_x(j);
-                    let y = self.i_to_y(i);
+                    let (x, y) = self.map_position_to_window_position((i, j));
 
-                    player_text.draw((player.to_string()+ "g").as_str() , self.glyphs.as_mut().unwrap(),
+                    player_text.draw(player.to_string().as_str() , self.glyphs.as_mut().unwrap(),
                                      &draw_state::DrawState::default(), c.transform.trans(x, y + font_size as f64),
                                      self.gl.as_mut().unwrap());
                 }
