@@ -82,15 +82,12 @@ impl Game<'_> {
         self.building_map = Map::<Option<Building>>::new(self.map_size, self.map_size, None);
         self.territory_map = Map::<usize>::new(self.map_size, self.map_size, self.player_num);
 
-        // Initialize height map with random height value [0, 1]
-        let mut rng = rand::thread_rng();
+        // Generate procedurally height map
         self.height_map = Map::<f64>::new(self.map_size, self.map_size, 0.0);
-        for i in 0..(self.map_size) {
-            for j in 0..(self.map_size) {
-                self.height_map[(i, j)] = rng.gen();
-            }
-        }
-        self.height_map = diamond_square(self.map_size_level, true);
+        self.height_map = noise_map(self.map_size, 
+            vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0], 
+            vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0], 
+            2.0, false);
 
         // Initialize players 
         // TODO : Initialize base position for all players with clever algorithm
@@ -444,9 +441,16 @@ impl Game<'_> {
                     self.turn();
                 },
                 Key::R => {
-                    self.view_in_map_width = self.map_size as f64;
-                    self.view_in_map_height = self.map_size as f64;
-                    self.look_at([self.map_size as f64 / 2.0, self.map_size as f64 / 2.0]);
+                    self.look_at_overview();
+                },
+                Key::G => {
+                    self.height_map = noise_map(self.map_size, 
+                        vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0], 
+                        vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0], 
+                        2.0, false);
+                },
+                Key::H => {
+                    self.height_map = diamond_square(self.map_size);
                 }
                 _ => {}
             }
