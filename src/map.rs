@@ -163,7 +163,7 @@ pub fn noise_map(map_size: usize, frequencies: Vec<f64>, frequencies_weight: Vec
                 noise_map[(i, j)] += w * noise_gen.get([f * ni, f * nj]);
             }
         }
-        }
+    }
 
     // Normalize by frequecy weight sum
     noise_map.map = noise_map.map.iter().map(|x| x / weights_sum).collect();

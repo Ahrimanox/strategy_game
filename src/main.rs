@@ -43,7 +43,7 @@ fn main_game() {
         background_color: [0.0, 0.0, 0.0, 1.0],
 
         grid_line_color: [0.0, 0.0, 0.0, 1.0],
-        reachable_cell_color_mask: [1.0, 0.0, 0.0, 0.15],
+        reachable_cell_color_mask: [1.0, 0.0, 0.0, 0.3],
 
         view_in_window_x: 0.0,
         view_in_window_y: 0.0,
@@ -64,20 +64,22 @@ fn main_game() {
 
         active_unit_position: None,
 
-        color_ramp_value: vec![
-            0.0, // Eau profonde
-            0.0, // Eau douce
-            0.0, // Sable
-            0.0, // Herbe
-            1.0, // Montagne
-            1.0 // Neige
-        ],
-        color_ramp_color: vec![[0.007, 0.176, 0.357, 1.0], // Eau profonde
-                               [0.051, 0.286, 0.404, 1.0], // Eau douce
-                               [0.051, 0.286, 0.404, 1.0], // Sable
-                               [0.204, 0.412, 0.180, 1.0], // Herbe
-                               [0.557, 0.541, 0.341, 1.0], // Montage
-                               [1.0, 1.0, 1.0, 1.0]], // Neige
+        // color_ramp_value: vec![
+        //     0.0, // Eau profonde
+        //     0.3, // Eau douce
+        //     0.35, // Sable
+        //     0.40, // Herbe
+        //     0.70, // Montagne
+        //     0.9 // Neige
+        // ],
+        // color_ramp_color: vec![[0.007, 0.176, 0.357, 1.0], // Eau profonde
+        //                        [0.051, 0.286, 0.404, 1.0], // Eau douce
+        //                        [0.98, 0.84, 0.45, 1.0], // Sable
+        //                        [0.204, 0.412, 0.180, 1.0], // Herbe
+        //                        [0.557, 0.541, 0.341, 1.0], // Montage
+        //                        [1.0, 1.0, 1.0, 1.0]], // Neige
+        color_ramp_value: vec![0.0, 1.0],
+        color_ramp_color: vec![[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]],
 
         ..Game::default()
     };

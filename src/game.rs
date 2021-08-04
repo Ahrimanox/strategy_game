@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use piston::input::{RenderArgs, RenderEvent, Event, MouseCursorEvent, PressEvent, Button, MouseButton, ReleaseEvent, MouseScrollEvent};
 use piston::input::keyboard::Key;
 
@@ -12,9 +14,19 @@ use graphics::ellipse::Ellipse;
 
 use rand::prelude::*;
 
-use crate::map::{Map, diamond_square};
+use crate::map::{Map, diamond_square, noise_map};
 use crate::player::{Unit, Building, Player};
+use crate::distance::{EuclideanDistance2D, NullDistance2D, EuclideanDistanceWHeight2D};
+use crate::path_planning::astar_2d_map;
 
+pub enum Terrain {
+    DeepWater,
+    SoftWater,
+    Sand,
+    Grass,
+    Rock,
+    Snow
+}
 
 #[derive(Default)]
 pub struct Game<'a> {
@@ -61,20 +73,28 @@ pub struct Game<'a> {
     // Height map
     pub height_map: Map<f64>,
 
+    // Terrain map
+    pub terrain_map: Map<Option<Terrain>>,
+
     pub color_ramp_value: Vec<f64>,
     pub color_ramp_color: Vec<[f32; 4]>,
 
     pub active_player: usize,
     pub active_unit_position: Option<[usize; 2]>,
-    pub latest_mouse_position: Option<[f64; 2]>,
+    pub active_unit_planned_path: Option<VecDeque<(i32, i32)>>,
+    pub current_mouse_position: Option<[f64; 2]>,
 
+    pub current_underlying_cell: Option<[usize; 2]>,
     pub pressed_map_cell: Option<[usize; 2]>,
     pub released_map_cell: Option<[usize; 2]>,
 }
 
 impl Game<'_> {
+    
     // Init game
     pub fn init(&mut self) {
+
+        // Compute map size
         self.map_size = (2 as usize).pow(4+self.map_size_level)+1;
 
         // Initialize unit map and building map with None
@@ -90,7 +110,7 @@ impl Game<'_> {
             2.0, false);
 
         // Initialize players 
-        // TODO : Initialize base position for all players with clever algorithm
+        // TODO : Initialize base position for all players with clever algorithm -->
         self.players = Vec::<Player>::new();
         self.players.push(Player::new([0, 0], [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
         self.players.push(Player::new([self.map_size - 1, self.map_size - 1], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
@@ -159,10 +179,11 @@ impl Game<'_> {
         }
 
         // Look at active player base position
-        let active_player_base_position = self.players[self.active_player].base_position;
-        self.view_in_map_width = 32.0;
-        self.view_in_map_height = 32.0;
-        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+        // let active_player_base_position = self.players[self.active_player].base_position;
+        // self.view_in_map_width = 32.0;
+        // self.view_in_map_height = 32.0;
+        // self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+        self.look_at_overview();
     }
 
     // Utility functions
@@ -257,22 +278,27 @@ impl Game<'_> {
 
     // Gameplay functions
     fn turn(&mut self) {
+
+        // Update active player, active unit position and active planned path
+        self.active_player = (self.active_player + 1) % self.player_num;
+        // let active_player_base_position = self.players[self.active_player].base_position;
+        // self.view_in_map_width = 16.0;
+        // self.view_in_map_height = 16.0;
+        // self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+        self.deactivate_active_unit();
+
+        // Restore all moves of current active player units
         for unit in self.unit_map.map.iter_mut() {
             if let Some(unit) = unit {
-                unit.remaining_moves = unit.speed;
+                if unit.player == self.active_player {
+                    unit.remaining_moves = unit.speed;
+                }
             }
         }
-
-        // Change active player and reset active unit position
-        self.active_player = (self.active_player + 1) % self.player_num;
-        let active_player_base_position = self.players[self.active_player].base_position;
-        self.view_in_map_width = 16.0;
-        self.view_in_map_height = 16.0;
-        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
-        self.active_unit_position = None;
     }
 
     fn deactivate_active_unit(&mut self) {
+        self.active_unit_planned_path = None;
         self.active_unit_position = None;
     }
 
@@ -306,9 +332,24 @@ impl Game<'_> {
 
     // Event and Update methods
     pub fn process_event(&mut self, event: Event) {
-        // Get the latest mouse position
+
+        // Update the current mouse position and underlying cell (if possible)
         if let Some(args) = event.mouse_cursor_args() {
-            self.latest_mouse_position = Some(args);
+            self.current_mouse_position = Some(args);
+
+            // Get underlying map cell position
+            let (mx, my) = (args[0], args[1]);
+            let (mi, mj) = self.window_position_to_map_position((mx, my));
+
+            if self.is_in_map((mi, mj)) {
+                self.current_underlying_cell = Some([mi as usize, mj as usize]);
+            }
+            else {
+                self.current_underlying_cell = None;
+            }
+        }
+        else {
+            self.current_mouse_position = None;
         }
 
         // Mouse button pressed
@@ -316,21 +357,15 @@ impl Game<'_> {
             
             // Left mouse button pressed
             if mouse_button == MouseButton::Left {
-                let latest_mouse_pos = self.latest_mouse_position.unwrap();
-
-                let (mx, my) = (latest_mouse_pos[0], latest_mouse_pos[1]);
-                let (mi, mj) = self.window_position_to_map_position((mx, my));
-
-                if self.is_in_map((mi, mj)) {
-                    self.pressed_map_cell = Some([mi as usize, mj as usize]);
+                
+                // If there is underlying map cell -> Press on
+                if let Some(current_underlying_cell) = self.current_underlying_cell {
+                    self.pressed_map_cell = Some(current_underlying_cell)
                 }
                 else {
                     self.pressed_map_cell = None;
                 }
             }
-
-            // Right mouse button pressed
-            // NOHTING
         }
 
         // Mouse button released
@@ -338,30 +373,29 @@ impl Game<'_> {
             
             // Left mouse button released
             if mouse_button == MouseButton::Left {
-                let latest_mouse_position = self.latest_mouse_position.unwrap();
 
-                // TODO : Make a function with that
-                let (mx, my) = (latest_mouse_position[0], latest_mouse_position[1]);
-                let (mi, mj) = self.window_position_to_map_position((mx, my));
-
-                if self.is_in_map((mi, mj)) {
-                    self.released_map_cell = Some([mi as usize, mj as usize]);
+                // If there is underlying map cell -> Release from
+                if let Some(current_underlying_cell) = self.current_underlying_cell {
+                    self.released_map_cell = Some(current_underlying_cell)
                 }
                 else {
                     self.released_map_cell = None;
                 }
 
-                // Click event
+                // If pressed map cell and released map cell is equal -> CLICK EVENT
                 if self.pressed_map_cell == self.released_map_cell {
                     if let Some(released_map_cell) = self.released_map_cell {
-                        println!("Click on i={}, j={} ...", released_map_cell[0], released_map_cell[1]);
-
+                        let cpos = (released_map_cell[0], released_map_cell[1]);
+                        let (ci, cj) = (cpos.0 as i32, cpos.1 as i32);
+                        
                         // Check if there is an active unit
                         if let Some(active_unit_position) = self.active_unit_position {
-                            if let Some(active_unit) = &self.unit_map[(active_unit_position[0], active_unit_position[1])] {
-                                println!("... while having active unit : {:?} ...", active_unit);
-                                if let Some(underlying_unit) = &self.unit_map[(released_map_cell[0], released_map_cell[1])] {
-                                    println!("... and clicking on unit : {:?}", underlying_unit);
+                            
+                            let upos = (active_unit_position[0], active_unit_position[1]);
+                            if let Some(active_unit) = &self.unit_map[upos] {
+                                
+                                if let Some(underlying_unit) = &self.unit_map[cpos] {
+                                    
                                     // Same unit --> Deactivation of unit
                                     if underlying_unit == active_unit {
                                         self.deactivate_active_unit();
@@ -378,23 +412,42 @@ impl Game<'_> {
     
                                 // No underlying unit and active unit --> Possible moves
                                 else {
-                                    let d = (released_map_cell[0] as i32 - active_unit_position[0] as i32).abs() + (released_map_cell[1] as i32 - active_unit_position[1] as i32).abs();
-                                    if d <= active_unit.remaining_moves as i32 {
-                                        // Make the moves
-                                        self.unit_map[(released_map_cell[0], released_map_cell[1])] = self.unit_map[(active_unit_position[0], active_unit_position[1])];
-                                        self.unit_map[(active_unit_position[0], active_unit_position[1])] = None;
-
-                                        // Update active unit remaining moves and position
-                                        if let Some(active_unit) = &mut self.unit_map[(released_map_cell[0], released_map_cell[1])] {
-                                            active_unit.remaining_moves -= d;
-                                            active_unit.position = released_map_cell;
-                                            self.territory_map[(released_map_cell[0], released_map_cell[1])] = active_unit.player;
-                                        }
-
-                                        // Update active unit positition
-                                        self.active_unit_position = Some(released_map_cell);
+                                    // Compute "optimal" path from active unit position to the pointed position
+                                    let start = (upos.0 as i32, upos.1 as i32);
+                                    let goal = (ci, cj);
+                                    let path_res = astar_2d_map(start, goal, (self.map_size as i32, self.map_size as i32), EuclideanDistanceWHeight2D{
+                                        height_map: &self.height_map
+                                    }, NullDistance2D{});
+                                    if let Some(path) = path_res {
+                                        println!("There is a path from start to goal, length : {}", path.len());
+                                        self.active_unit_planned_path = Some(path);
                                     }
+                                    else {
+                                        self.active_unit_planned_path = None;
+                                        println!("Something wrong with path planning step");
+                                    }
+
+
+                                    // let d = (released_map_cell[0] as i32 - active_unit_position[0] as i32).abs() + (released_map_cell[1] as i32 - active_unit_position[1] as i32).abs();
+                                    // if d <= active_unit.remaining_moves as i32 {
+                                    //     // Make the moves
+                                    //     self.unit_map[(released_map_cell[0], released_map_cell[1])] = self.unit_map[(active_unit_position[0], active_unit_position[1])];
+                                    //     self.unit_map[(active_unit_position[0], active_unit_position[1])] = None;
+
+                                    //     // Update active unit remaining moves and position
+                                    //     if let Some(active_unit) = &mut self.unit_map[(released_map_cell[0], released_map_cell[1])] {
+                                    //         active_unit.remaining_moves -= d;
+                                    //         active_unit.position = released_map_cell;
+                                    //         self.territory_map[(released_map_cell[0], released_map_cell[1])] = active_unit.player;
+                                    //     }
+
+                                    //     // Update active unit positition
+                                    //     self.active_unit_position = Some(released_map_cell);
+                                    // }
                                 }
+                            }
+                            else {
+                                println!("No active unit");
                             }
                         }
 
@@ -412,10 +465,8 @@ impl Game<'_> {
                 }
 
                 self.pressed_map_cell = None;
+                self.released_map_cell = None;
             }
-
-            // Right mouse button released
-            // NOTHING
         }
 
         // Keyboard button pressed
@@ -507,7 +558,7 @@ impl Game<'_> {
                 let transform = c.transform.trans(x, y);
 
                 // Draw each grid cell
-                rectangle(self.h_to_color(self.height_map[(i as usize, j as usize)], false), cell, transform, self.gl.as_mut().unwrap());
+                rectangle(self.h_to_color(self.height_map[(i as usize, j as usize)], true), cell, transform, self.gl.as_mut().unwrap());
             }
         }
 
@@ -573,6 +624,27 @@ impl Game<'_> {
                     }
                 }
             }
+        }
+    }
+
+    fn render_planned_path(&mut self, c: Context) {
+
+        // If there is an active planned path -> Render it
+        if let Some(path) = &self.active_unit_planned_path {
+
+            // Compute cell dimensions in pixel and define reachable mask shape
+            let (cell_pix_width, cell_pix_height) = self.cell_pixel();
+            let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
+            let visible_map_bounds = self.visible_map_bounds();
+
+            for (i, j) in path.iter() {
+                if self.is_in_rect((*i, *j), visible_map_bounds) {
+                    let (x, y) = self.map_position_to_window_position((*i, *j));
+                    let transform = c.transform.trans(x, y);
+                    rectangle(self.reachable_cell_color_mask, reachable_cell, transform, self.gl.as_mut().unwrap());
+                }
+            }
+
         }
     }
 
@@ -902,7 +974,7 @@ impl Game<'_> {
         self.render_grid(c, false);
 
         // Render reachable cell by active unit
-        self.render_unit_reachable_cells(c);
+        self.render_planned_path(c);
 
         // Render units and buildings
         self.render_buildings(c);
