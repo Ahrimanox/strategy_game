@@ -22,10 +22,10 @@ impl Ord for CostNode {
             Ordering::Equal
         }
         else if self.cost > other.cost {
-            Ordering::Greater
+            Ordering::Less
         }
         else {
-            Ordering::Less
+            Ordering::Greater
         }
     }
 }
@@ -40,10 +40,37 @@ pub fn neighbours_4c(position: (i32, i32), map_size: (i32, i32)) -> Vec<(i32, i3
     
     let mut neighbours = Vec::new();
 
-    if position.1 < map_size.1 {neighbours.push((position.0, position.1 + 1));}
-    if position.0 > 0 {neighbours.push((position.0 - 1, position.1));}
-    if position.1 > 0 {neighbours.push((position.0, position.1 - 1));}
-    if position.0 < map_size.0 {neighbours.push((position.0 + 1, position.1));}
+    let is_at_west = position.0 == 0;
+    let is_at_east = position.0 == (map_size.0 - 1);
+    let is_at_north = position.1 == 0;
+    let is_at_south = position.1 == (map_size.1 - 1);
+
+    if !is_at_west {neighbours.push((position.0 - 1, position.1));}
+    if !is_at_east {neighbours.push((position.0 + 1, position.1));}
+    if !is_at_north {neighbours.push((position.0, position.1 - 1));}
+    if !is_at_south {neighbours.push((position.0, position.1 + 1));}
+
+    neighbours
+}
+
+pub fn neighbours_8c(position: (i32, i32), map_size: (i32, i32)) -> Vec<(i32, i32)> {
+    
+    let mut neighbours = Vec::new();
+
+    let is_at_west = position.0 == 0;
+    let is_at_east = position.0 == (map_size.0 - 1);
+    let is_at_north = position.1 == 0;
+    let is_at_south = position.1 == (map_size.1 - 1);
+
+    if !is_at_west {neighbours.push((position.0 - 1, position.1));}
+    if !is_at_east {neighbours.push((position.0 + 1, position.1));}
+    if !is_at_north {neighbours.push((position.0, position.1 - 1));}
+    if !is_at_south {neighbours.push((position.0, position.1 + 1));}
+
+    if !is_at_west && !is_at_north {neighbours.push((position.0 - 1, position.1 - 1));}
+    if !is_at_west && !is_at_south {neighbours.push((position.0 - 1, position.1 + 1));}
+    if !is_at_east && !is_at_north {neighbours.push((position.0 + 1, position.1 - 1));}
+    if !is_at_east && !is_at_south {neighbours.push((position.0 + 1, position.1 + 1));}
 
     neighbours
 }
@@ -60,7 +87,8 @@ pub fn reconstruct_path(current: (i32, i32), best_previous_node: HashMap<(i32, i
     total_path
 }
 
-pub fn astar_2d_map_4c(start: (i32, i32), goal: (i32, i32), map_size: (i32, i32), distance: &impl Distance2D, heuristic: &impl Distance2D) -> Option<VecDeque<(i32, i32)>> {
+
+pub fn astar_2d_map(start: (i32, i32), goal: (i32, i32), map_size: (i32, i32), distance: impl Distance2D, heuristic: impl Distance2D) -> Option<VecDeque<(i32, i32)>> {
     // Initialize priority queue as min-binary heap
     // Structure holding potentially next nodes to explore 
 
