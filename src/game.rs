@@ -239,7 +239,7 @@ impl Game<'_> {
                 let lcolor = self.color_ramp_color[i];
                 let rcolor = self.color_ramp_color[i+1];
                 if h >= lvalue && h < rvalue {
-                    let alpha: f32 = ((h - lvalue) / (rvalue - lvalue)) as f32;
+                    let alpha: f32 = 1.0 - ((h - lvalue) / (rvalue - lvalue)) as f32;
                     return [lcolor[0] * alpha + rcolor[0] * (1.0 - alpha), 
                             lcolor[1] * alpha + rcolor[1] * (1.0 - alpha), 
                             lcolor[2] * alpha + rcolor[2] * (1.0 - alpha), 
