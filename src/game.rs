@@ -301,6 +301,12 @@ impl Game<'_> {
         self.view_in_map_j = j - self.view_in_map_width / 2.0;
     }
 
+    fn look_at_overview(&mut self) {
+        self.view_in_map_width = self.map_size as f64;
+        self.view_in_map_height = self.map_size as f64;
+        self.look_at([self.map_size as f64 / 2.0, self.map_size as f64 / 2.0]);
+    }
+
     // Event and Update methods
     pub fn process_event(&mut self, event: Event) {
         // Get the latest mouse position
