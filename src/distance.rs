@@ -23,7 +23,7 @@ impl Distance2D for ManhattanDistance2D {
 pub struct NullDistance2D {}
 
 impl Distance2D for NullDistance2D {
-    fn evaluate(&self, pos1: (f64, f64), pos2: (f64, f64)) -> f64 {
+    fn evaluate(&self, _pos1: (f64, f64), _pos2: (f64, f64)) -> f64 {
         0.0
     }
 }
@@ -38,8 +38,8 @@ impl<'d> Distance2D for EuclideanDistanceWHeight2D<'_> {
         let ipos1 = (pos1.0 as i32, pos1.1 as i32);
         let ipos2 = (pos2.0 as i32, pos2.1 as i32);
 
-        let height1 = self.height_map[ipos1];
-        let height2 = self.height_map[ipos2];
+        let height1 = self.height_map[ipos1] * 10.0;
+        let height2 = self.height_map[ipos2] * 10.0;
 
         ((pos2.0 - pos1.0).powi(2) + (pos2.1 - pos1.1).powi(2) + (height2 - height1).powi(2)).sqrt()
     }

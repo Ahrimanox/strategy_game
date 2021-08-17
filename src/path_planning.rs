@@ -75,20 +75,20 @@ pub fn neighbours_8c(position: (i32, i32), map_size: (i32, i32)) -> Vec<(i32, i3
     neighbours
 }
 
-pub fn reconstruct_path(current: (i32, i32), best_previous_node: HashMap<(i32, i32), (i32, i32)>) -> VecDeque<(i32, i32)> {
+pub fn reconstruct_path(current: (i32, i32), best_previous_node: HashMap<(i32, i32), (i32, i32)>, distance_from_start: HashMap<(i32, i32), f64>) -> VecDeque<(i32, i32, f64)> {
     let mut total_path = VecDeque::new();
-    total_path.push_front(current);
+    total_path.push_front((current.0, current.1, *distance_from_start.get(&current).unwrap()));
     let mut current = current;
     while let Some(prev) = best_previous_node.get(&current) {
         current = *prev;
-        total_path.push_front(*prev);
+        total_path.push_front((prev.0, prev.1, *distance_from_start.get(&current).unwrap()));
     }
 
     total_path
 }
 
 
-pub fn astar_2d_map(start: (i32, i32), goal: (i32, i32), map_size: (i32, i32), distance: impl Distance2D, heuristic: impl Distance2D) -> Option<VecDeque<(i32, i32)>> {
+pub fn astar_2d_map(start: (i32, i32), goal: (i32, i32), map_size: (i32, i32), distance: impl Distance2D, heuristic: impl Distance2D) -> Option<VecDeque<(i32, i32, f64)>> {
     // Initialize priority queue as min-binary heap
     // Structure holding potentially next nodes to explore 
 
@@ -116,7 +116,7 @@ pub fn astar_2d_map(start: (i32, i32), goal: (i32, i32), map_size: (i32, i32), d
         
         // Check if current node is at goal ==> Reconstruct Path
         if current_pos == goal {
-            return Some(reconstruct_path(goal, best_previous_node));
+            return Some(reconstruct_path(goal, best_previous_node, distance_from_start));
         }
 
         open_set.remove(&current.position);

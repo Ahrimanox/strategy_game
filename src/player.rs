@@ -7,10 +7,10 @@ pub struct Unit {
     pub position: [usize; 2],
 
     // Attributes
-    pub damage: i32,
-    pub health: i32,
-    pub speed: i32,
-    pub remaining_moves: i32
+    pub damage: f64,
+    pub health: f64,
+    pub speed: f64,
+    pub remaining_moves: f64
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]

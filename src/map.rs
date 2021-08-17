@@ -1,13 +1,11 @@
-use std::ops::Sub;
-use std::ops::Div;
 use rand::prelude::*;
-use noise::{NoiseFn, Seedable, Perlin, OpenSimplex, SuperSimplex};
+use noise::{NoiseFn, Seedable, SuperSimplex};
 use std::ops::{Index, IndexMut};
 use std::collections::VecDeque;
 
-pub trait MapType {}
-impl MapType for f64 {}
-impl MapType for i32 {}
+// pub trait MapType {}
+// impl MapType for f64 {}
+// impl MapType for i32 {}
 
 #[derive(Default)]
 pub struct Map<T> {
@@ -77,6 +75,15 @@ impl<T> IndexMut<(i32, i32)> for Map<T> {
     fn index_mut(&mut self, pos: (i32, i32)) -> &mut Self::Output {
         let (i, j) = pos;
         &mut self.map[i as usize * self.width + j as usize]
+    }
+}
+
+impl<T> Map<T> {
+    pub fn swap(&mut self, pos1: (usize, usize), pos2: (usize, usize)) {
+        let ravel_pos1 = pos1.0 * self.width + pos1.1;
+        let ravel_pos2 = pos2.0 * self.width + pos2.1;
+
+        self.map.swap(ravel_pos1, ravel_pos2);
     }
 }
 
@@ -173,13 +180,12 @@ pub fn noise_map(map_size: usize, frequencies: Vec<f64>, frequencies_weight: Vec
 
     if island {
         // Apply island transform to map
-        let half = (map_size / 2) as f64;
+        let _half = (map_size / 2) as f64;
         for i in 0..(map_size as i32) {
             // let wi = 1.0 - ((i as f64 - half).abs() / half);
             for j in 0..(map_size as i32) {
                 let ni = ((i as f64 + 0.5) / map_size as f64) - 0.5;
                 let nj = ((j as f64 + 0.5) / map_size as f64) - 0.5;
-                let d = 2.0 * ni.abs().max(nj.abs());
                 let d = (ni.powi(2) + nj.powi(2)).sqrt() / 0.5_f64.sqrt();
                 noise_map[(i, j)] = (1.0 + noise_map[(i, j)] - d) / 2.0;
             }

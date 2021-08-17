@@ -27,12 +27,12 @@ fn main_game() {
         .graphics_api(opengl)
         .exit_on_esc(true)
         .resizable(false)
-        .samples(8)
+        .samples(16)
         .build()
         .unwrap();
 
     let texture_settings = TextureSettings::new().filter(Filter::Nearest);
-    let mut glyphs: GlyphCache = GlyphCache::new("fonts/Consolas.ttf", (), texture_settings).expect("Failed to load font !");
+    let glyphs: GlyphCache = GlyphCache::new("fonts/FSEX300.ttf", (), texture_settings).expect("Failed to load font !");
 
     // Create a new game instance and run it.
     let map_size_level = 0;
@@ -59,7 +59,7 @@ fn main_game() {
         view_in_map_width: (2 as u32).pow(4+map_size_level) as f64+1.0,
         view_in_map_height: (2 as u32).pow(4+map_size_level) as f64+1.0,
 
-        unit_default_speed: 4,
+        unit_default_speed: 4.0,
         player_num: 2,
 
         active_unit_position: None,

@@ -12,11 +12,9 @@ use graphics::text::Text;
 use graphics::rectangle::Rectangle;
 use graphics::ellipse::Ellipse;
 
-use rand::prelude::*;
-
 use crate::map::{Map, diamond_square, noise_map};
 use crate::player::{Unit, Building, Player};
-use crate::distance::{EuclideanDistance2D, NullDistance2D, EuclideanDistanceWHeight2D};
+use crate::distance::{NullDistance2D, EuclideanDistanceWHeight2D};
 use crate::path_planning::astar_2d_map;
 
 pub enum Terrain {
@@ -55,7 +53,7 @@ pub struct Game<'a> {
     pub view_in_map_height: f64,
 
     // Game variables
-    pub unit_default_speed: i32,
+    pub unit_default_speed: f64,
     pub player_num: usize,
 
     // Player vector
@@ -81,7 +79,7 @@ pub struct Game<'a> {
 
     pub active_player: usize,
     pub active_unit_position: Option<[usize; 2]>,
-    pub active_unit_planned_path: Option<VecDeque<(i32, i32)>>,
+    pub active_unit_planned_path: Option<VecDeque<(i32, i32, f64)>>,
     pub current_mouse_position: Option<[f64; 2]>,
 
     pub current_underlying_cell: Option<[usize; 2]>,
@@ -107,7 +105,7 @@ impl Game<'_> {
         self.height_map = noise_map(self.map_size, 
             vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0], 
             vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0], 
-            2.0, false);
+            4.0, false);
 
         // Initialize players 
         // TODO : Initialize base position for all players with clever algorithm -->
@@ -142,32 +140,32 @@ impl Game<'_> {
         units_to_add.push(Unit {
             player: 0,
             position: [0, 1],
-            damage: 1,
-            health: 1,
+            damage: 1.0,
+            health: 1.0,
             speed: self.unit_default_speed,
             remaining_moves: self.unit_default_speed
         });
         units_to_add.push(Unit {
             player: 0,
             position: [1, 0],
-            damage: 1,
-            health: 1,
+            damage: 1.0,
+            health: 1.0,
             speed: self.unit_default_speed,
             remaining_moves: self.unit_default_speed
         });
         units_to_add.push(Unit {
             player: 1,
             position: [self.map_size - 1, self.map_size - 2],
-            damage: 1,
-            health: 1,
+            damage: 1.0,
+            health: 1.0,
             speed: self.unit_default_speed,
             remaining_moves: self.unit_default_speed
         });
         units_to_add.push(Unit {
             player: 1,
             position: [self.map_size - 2, self.map_size - 1],
-            damage: 1,
-            health: 1,
+            damage: 1.0,
+            health: 1.0,
             speed: self.unit_default_speed,
             remaining_moves: self.unit_default_speed
         });
@@ -219,26 +217,34 @@ impl Game<'_> {
         (x, y)
     }
 
-    fn is_in_rect<T: PartialOrd>(&self, position: (T, T), rect: (T, T, T, T)) -> bool {
+    fn is_in_rect<T: PartialOrd>(&self, position: (T, T), rect: (T, T, T, T), inclusive_stop: bool) -> bool {
         let (x, y) = position;
         let (x0, y0, x1, y1) = rect;
-        if x > x1 {return false;}
-        else if x < x0 {return false;}
-        else if y > y1 {return false;}
-        else if y < y0 {return false;}
-        else {return true;}
+        
+        if x < x0 {return false;}
+        if y < y0 {return false;}
+        if inclusive_stop {
+            if x > x1 {return false;}
+            if y > y1 {return false;}
+        }
+        else {
+            if x >= x1 {return false;}
+            if y >= y1 {return false;}
+        }
+        
+        return true;
     }
 
     fn is_in_window(&self, window_position: (f64, f64)) -> bool {
         let (x, y) = window_position;
         let window_rect = (0.0, 0.0, self.map_size as f64, self.map_size as f64);
-        self.is_in_rect((x, y), window_rect)
+        self.is_in_rect((x, y), window_rect, true)
     }
 
     fn is_in_map(&self, map_position: (i32, i32)) -> bool {
         let (i, j) = map_position;
         let map_rect = (0, 0, self.map_size as i32, self.map_size as i32);
-        self.is_in_rect((i, j), map_rect)
+        self.is_in_rect((i, j), map_rect, false)
     }
 
     fn h_to_color(&self, h: f64, interpolate: bool) -> [f32; 4] {
@@ -308,6 +314,62 @@ impl Game<'_> {
 
         // Activate unit by storing its position
         self.active_unit_position = Some(new_active_unit_position);
+    }
+
+    fn moves(&mut self, destination: [usize; 2]) {
+
+        // Get active unit position
+        if let Some(active_unit_position) = self.active_unit_position {
+            
+            // Make the moves by swapping element
+            self.unit_map.swap((active_unit_position[0], active_unit_position[1]), (destination[0], destination[1]));
+            
+            // Update active unit position attribute
+            if let Some(active_unit) = &mut self.unit_map[(destination[0], destination[1])] {
+                active_unit.position = destination;
+                self.active_unit_position = Some(destination);
+            }
+        }
+    }
+
+    fn takes_territory(&mut self, territory_position: (usize, usize)) {
+        self.territory_map[territory_position] = self.active_player;
+    }
+
+    fn execute_planned_path(&mut self) {
+        
+        // Check if there is an active unit by taking active unit position
+        if let Some(active_unit_position) = self.active_unit_position {
+
+            let apos = (active_unit_position[0], active_unit_position[1]);
+            let mut remaining_moves = 0.0;
+            if let Some(active_unit) = self.unit_map[apos] {
+                remaining_moves = active_unit.remaining_moves;
+            }
+
+            // If there is an active planned path -> Execute it
+            let mut previous_cost = 0.0;
+            let mut last_position = active_unit_position;
+            for (i, j, cost) in self.active_unit_planned_path.as_ref().unwrap().clone().iter() {
+                
+                // Check if move is possible by checking updated remaining move
+                if remaining_moves >= (*cost - previous_cost) {
+                    remaining_moves -= *cost - previous_cost;
+                    self.moves([*i as usize, *j as usize]);
+                    self.takes_territory((*i as usize, *j as usize));
+                    last_position = [*i as usize, *j as usize];
+                    previous_cost = *cost;
+                }
+            }
+
+            // Reset active unit planned path
+            self.active_unit_planned_path = None;
+
+            // Update remaining move for the active unit
+            if let Some(active_unit) = &mut self.unit_map[(last_position[0], last_position[1])] {
+                active_unit.remaining_moves = remaining_moves;
+            }
+        }
     }
 
     // View-related functions
@@ -391,19 +453,20 @@ impl Game<'_> {
                         // Check if there is an active unit
                         if let Some(active_unit_position) = self.active_unit_position {
                             
-                            let upos = (active_unit_position[0], active_unit_position[1]);
-                            if let Some(active_unit) = &self.unit_map[upos] {
-                                
+                            let apos = (active_unit_position[0], active_unit_position[1]);
+                            if let Some(active_unit) = &self.unit_map[apos] {
                                 if let Some(underlying_unit) = &self.unit_map[cpos] {
                                     
                                     // Same unit --> Deactivation of unit
                                     if underlying_unit == active_unit {
                                         self.deactivate_active_unit();
                                     }
+
                                     // Unit of other player --> Possible attacks
                                     else if active_unit.player != underlying_unit.player {
-                                        println!("Possible attacks of current active unit {:?} against {:?}", active_unit, underlying_unit);
+
                                     }
+
                                     // Another unit of the same player --> Deactivation and Activation of other unit
                                     else {
                                         self.activate_unit(underlying_unit.position);
@@ -413,7 +476,7 @@ impl Game<'_> {
                                 // No underlying unit and active unit --> Possible moves
                                 else {
                                     // Compute "optimal" path from active unit position to the pointed position
-                                    let start = (upos.0 as i32, upos.1 as i32);
+                                    let start = (apos.0 as i32, apos.1 as i32);
                                     let goal = (ci, cj);
                                     let path_res = astar_2d_map(start, goal, (self.map_size as i32, self.map_size as i32), EuclideanDistanceWHeight2D{
                                         height_map: &self.height_map
@@ -447,15 +510,16 @@ impl Game<'_> {
                                 }
                             }
                             else {
-                                println!("No active unit");
+
                             }
                         }
 
                         // No active unit 
                         else {
+                            
                             // Activation underlying unit
                             if let Some(underlying_unit) = &self.unit_map[(released_map_cell[0], released_map_cell[1])] {
-                                println!("Click on unit : {:?}", underlying_unit);
+                                
                                 if underlying_unit.player == self.active_player {
                                     self.active_unit_position = Some(underlying_unit.position);
                                 }
@@ -488,8 +552,11 @@ impl Game<'_> {
                 Key::Right | Key::D => {
                     self.view_in_map_j = (self.view_in_map_j + view_move_j).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
                 },
-                Key::Space => {
+                Key::T => {
                     self.turn();
+                },
+                Key::Space => {
+                    self.execute_planned_path();
                 },
                 Key::R => {
                     self.look_at_overview();
@@ -498,7 +565,7 @@ impl Game<'_> {
                     self.height_map = noise_map(self.map_size, 
                         vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0], 
                         vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0], 
-                        2.0, false);
+                        4.0, false);
                 },
                 Key::H => {
                     self.height_map = diamond_square(self.map_size);
@@ -601,50 +668,107 @@ impl Game<'_> {
         }
     }
 
-    fn render_unit_reachable_cells(&mut self, c: Context) {
-        // Draw reachable mask at reachable cells by active unit if there is an active one
-        if let Some(active_unit_position) = self.active_unit_position {
-            if let Some(active_unit) = &self.unit_map[(active_unit_position[0], active_unit_position[1])] {
-                // Compute cell dimensions in pixel and define reachable mask shape
-                let (cell_pix_width, cell_pix_height) = self.cell_pixel();
-                let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
-                let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = self.visible_map_bounds();
+    // fn render_unit_reachable_cells(&mut self, c: Context) {
+    //     // Draw reachable mask at reachable cells by active unit if there is an active one
+    //     if let Some(active_unit_position) = self.active_unit_position {
+    //         if let Some(active_unit) = &self.unit_map[(active_unit_position[0], active_unit_position[1])] {
+    //             // Compute cell dimensions in pixel and define reachable mask shape
+    //             let (cell_pix_width, cell_pix_height) = self.cell_pixel();
+    //             let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
+    //             let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = self.visible_map_bounds();
 
-                // Draw each reachable cell by active unit
-                let (pi, pj) = (active_unit_position[0] as i32, active_unit_position[1] as i32);
-                let (ibeg, iend) = (std::cmp::max(pi - active_unit.remaining_moves, view_in_map_i1), std::cmp::min(pi + active_unit.remaining_moves, view_in_map_i2-1));
-                let (jbeg, jend) = (std::cmp::max(pj - active_unit.remaining_moves, view_in_map_j1), std::cmp::min(pj + active_unit.remaining_moves, view_in_map_j2-1));
-                for i in ibeg..=iend {
-                    for j in jbeg..=jend {
-                        let d = (pi - i).abs() + (pj - j).abs();
-                        if d <= active_unit.remaining_moves && d > 0 {
-                            let transform = c.transform.trans(self.j_to_x(j), self.i_to_y(i));
-                            rectangle(self.reachable_cell_color_mask, reachable_cell, transform, self.gl.as_mut().unwrap());
-                        }
-                    }
-                }
-            }
-        }
-    }
+    //             // Draw each reachable cell by active unit
+    //             let (pi, pj) = (active_unit_position[0] as i32, active_unit_position[1] as i32);
+    //             let (ibeg, iend) = (std::cmp::max(pi - active_unit.remaining_moves, view_in_map_i1), std::cmp::min(pi + active_unit.remaining_moves, view_in_map_i2-1));
+    //             let (jbeg, jend) = (std::cmp::max(pj - active_unit.remaining_moves, view_in_map_j1), std::cmp::min(pj + active_unit.remaining_moves, view_in_map_j2-1));
+    //             for i in ibeg..=iend {
+    //                 for j in jbeg..=jend {
+    //                     let d = (pi - i).abs() + (pj - j).abs();
+    //                     if d as f64 <= active_unit.remaining_moves && d > 0 {
+    //                         let transform = c.transform.trans(self.j_to_x(j), self.i_to_y(i));
+    //                         rectangle(self.reachable_cell_color_mask, reachable_cell, transform, self.gl.as_mut().unwrap());
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     fn render_planned_path(&mut self, c: Context) {
+        
+        // Check if there is an active unit
+        if let Some(active_unit_position) = self.active_unit_position {
 
-        // If there is an active planned path -> Render it
-        if let Some(path) = &self.active_unit_planned_path {
+            let apos = (active_unit_position[0], active_unit_position[1]);
+            if let Some(active_unit) = &self.unit_map[apos] {
 
-            // Compute cell dimensions in pixel and define reachable mask shape
-            let (cell_pix_width, cell_pix_height) = self.cell_pixel();
-            let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
-            let visible_map_bounds = self.visible_map_bounds();
+                // If there is an active planned path -> Render it
+                if let Some(path) = &self.active_unit_planned_path {
 
-            for (i, j) in path.iter() {
-                if self.is_in_rect((*i, *j), visible_map_bounds) {
-                    let (x, y) = self.map_position_to_window_position((*i, *j));
-                    let transform = c.transform.trans(x, y);
-                    rectangle(self.reachable_cell_color_mask, reachable_cell, transform, self.gl.as_mut().unwrap());
+                    // Compute cell dimensions in pixel, define reachable mask shape font size and cost text
+                    let (cell_pix_width, cell_pix_height) = self.cell_pixel();
+                    let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
+                    let cost_font_size = (cell_pix_height / 6.0).floor() as u32;
+                    let cost_text = Text {
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        font_size: cost_font_size,
+                        round: false
+                    };
+
+                    let turn_font_size = (cell_pix_height / 4.0).floor() as u32;
+                    let turn_text = Text {
+                        color: [1.0, 0.0, 1.0, 1.0],
+                        font_size: turn_font_size,
+                        round: false
+                    };
+
+                    let visible_map_bounds = self.visible_map_bounds();
+                    
+                    let mut max_cost_in_turn = 0.0;
+                    for (i, j, cost) in path.iter() {
+                        if self.is_in_rect((*i, *j), visible_map_bounds, false) {
+                            let (x, y) = self.map_position_to_window_position((*i, *j));
+                            let transform = c.transform.trans(x, y);
+                            if (*cost - active_unit.remaining_moves as f64) < 0.0 {
+                                max_cost_in_turn = *cost;
+                                rectangle([0.0, 1.0, 0.0, 0.3], reachable_cell, transform, self.gl.as_mut().unwrap());
+                            }
+                            else {
+                                let turn_to_arrive = ((*cost - max_cost_in_turn) / active_unit.speed as f64).ceil();
+                                rectangle([1.0, 0.0, 0.0, 0.3], reachable_cell, transform, self.gl.as_mut().unwrap());
+                                
+                                let turn_to_arrive_str = turn_to_arrive.to_string();
+                                let turn_to_arrive_str_len = turn_to_arrive_str.len();
+                                
+                                let draw_res = turn_text.draw(
+                                    turn_to_arrive_str.as_str(), self.glyphs.as_mut().unwrap(), 
+                                    &draw_state::DrawState::default(), 
+                                    c.transform.trans(x + cell_pix_width - turn_to_arrive_str_len as f64 * turn_font_size as f64, y + cell_pix_height), 
+                                    self.gl.as_mut().unwrap()
+                                );
+
+                                if let Err(_error) = draw_res {
+                                    dbg!("Something went wrong when drawing planned path !");
+                                }
+                            }
+                            
+                            let cost_str = ((cost * 10.0).floor() / 10.0).to_string();
+                            let cost_str_len = cost_str.len();
+                            
+                            let draw_res = cost_text.draw(
+                                cost_str.as_str(), self.glyphs.as_mut().unwrap(), 
+                                &draw_state::DrawState::default(), 
+                                c.transform.trans(x + cell_pix_width - cost_str_len as f64 * cost_font_size as f64, y + cost_font_size as f64), 
+                                self.gl.as_mut().unwrap()
+                            );
+
+                            if let Err(_error) = draw_res {
+                                dbg!("Something went wrong when drawing planned path !");
+                            }
+                        }
+                    }               
                 }
             }
-
         }
     }
 
@@ -716,7 +840,7 @@ impl Game<'_> {
         // Draw units
         for i in view_in_map_i1..view_in_map_i2 {
             for j in view_in_map_j1..view_in_map_j2 {
-                if let Some(unit) = &self.unit_map[(i as usize, j as usize)] {
+                if let Some(unit) = &self.unit_map[(i, j)] {
                     let (x, y) = self.map_position_to_window_position((i, j));
                     unit_ellipse
                         .color(self.players[unit.player].principal_color)
@@ -733,7 +857,7 @@ impl Game<'_> {
 
         // Draw marker on active unit if there is one and if it is visible
         if let Some(active_unit_position) = self.active_unit_position {
-            if self.is_in_rect((active_unit_position[0] as i32, active_unit_position[1] as i32), visible_map_bounds) {
+            if self.is_in_rect((active_unit_position[0] as i32, active_unit_position[1] as i32), visible_map_bounds, false) {
                 let cell_padding_ratio = 1.0 / 2.5;
                 let marker_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
                 let marker_pix_height = cell_pix_height * (1.0 - cell_padding_ratio * 2.0);
@@ -758,7 +882,7 @@ impl Game<'_> {
 
     fn render_territory(&mut self, c: Context) {
         // Compute cell dimensions in pixel
-        let (cell_pix_width, cell_pix_height) = self.cell_pixel();
+        let (_cell_pix_width, cell_pix_height) = self.cell_pixel();
         let (view_in_map_i1, view_in_map_j1, view_in_map_i2, view_in_map_j2) = self.visible_map_bounds();
         let font_size = (cell_pix_height / 4.0).floor() as u32;
 
