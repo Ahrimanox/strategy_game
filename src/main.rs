@@ -35,7 +35,7 @@ fn main_game() {
     let glyphs: GlyphCache = GlyphCache::new("fonts/FSEX300.ttf", (), texture_settings).expect("Failed to load font !");
 
     // Create a new game instance and run it.
-    let map_size_level = 0;
+    let map_size_level = 1;
     let mut game = Game {
         gl: Some(GlGraphics::new(opengl)),
         glyphs: Some(glyphs),
@@ -63,21 +63,6 @@ fn main_game() {
         player_num: 2,
 
         active_unit_position: None,
-
-        // color_ramp_value: vec![
-        //     0.0, // Eau profonde
-        //     0.3, // Eau douce
-        //     0.35, // Sable
-        //     0.40, // Herbe
-        //     0.70, // Montagne
-        //     0.9 // Neige
-        // ],
-        // color_ramp_color: vec![[0.007, 0.176, 0.357, 1.0], // Eau profonde
-        //                        [0.051, 0.286, 0.404, 1.0], // Eau douce
-        //                        [0.98, 0.84, 0.45, 1.0], // Sable
-        //                        [0.204, 0.412, 0.180, 1.0], // Herbe
-        //                        [0.557, 0.541, 0.341, 1.0], // Montage
-        //                        [1.0, 1.0, 1.0, 1.0]], // Neige
         color_ramp_value: vec![0.0, 1.0],
         color_ramp_color: vec![[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]],
 

@@ -17,13 +17,16 @@ use crate::player::{Unit, Building, Player};
 use crate::distance::{NullDistance2D, EuclideanDistanceWHeight2D};
 use crate::path_planning::astar_2d_map;
 
-pub enum Terrain {
-    DeepWater,
-    SoftWater,
-    Sand,
-    Grass,
-    Rock,
-    Snow
+// Structure used to holding terrain information
+#[derive(Debug, Clone)]
+pub struct Terrain {
+    pub name: String,
+    pub color: [f32; 4],
+    pub height_interval: (f64, f64)
+}
+
+impl Default for Terrain {
+    fn default() -> Self {Terrain {name: String::from("None"), color: [0.0, 0.0, 0.0, 0.0], height_interval: (-1.0, -1.0)}}
 }
 
 #[derive(Default)]
@@ -72,7 +75,7 @@ pub struct Game<'a> {
     pub height_map: Map<f64>,
 
     // Terrain map
-    pub terrain_map: Map<Option<Terrain>>,
+    pub terrain_map: Map<Terrain>,
 
     pub color_ramp_value: Vec<f64>,
     pub color_ramp_color: Vec<[f32; 4]>,
@@ -100,15 +103,11 @@ impl Game<'_> {
         self.building_map = Map::<Option<Building>>::new(self.map_size, self.map_size, None);
         self.territory_map = Map::<usize>::new(self.map_size, self.map_size, self.player_num);
 
-        // Generate procedurally height map
-        self.height_map = Map::<f64>::new(self.map_size, self.map_size, 0.0);
-        self.height_map = noise_map(self.map_size, 
-            vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0], 
-            vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0], 
-            4.0, false);
+        // Generation of playable map
+        self.generate_map();
 
         // Initialize players 
-        // TODO : Initialize base position for all players with clever algorithm -->
+        // TODO : Initialize base position for all players with clever algorithm --> NOT URGENT
         self.players = Vec::<Player>::new();
         self.players.push(Player::new([0, 0], [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
         self.players.push(Player::new([self.map_size - 1, self.map_size - 1], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
@@ -182,6 +181,39 @@ impl Game<'_> {
         // self.view_in_map_height = 32.0;
         // self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
         self.look_at_overview();
+    }
+
+    // Map generation function
+    pub fn generate_map(&mut self) {
+
+        // Generate procedurally height map
+        self.height_map = Map::<f64>::new(self.map_size, self.map_size, 0.0);
+        self.height_map = noise_map(self.map_size, 
+            vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0,       128.0], 
+            vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0, 1.0 / 128.0], 
+            1.0, false);
+
+        // Assign Terrain to map cell according to cell height
+        let terrain_list = [
+            Terrain {name: String::from("DeepWater"), color: [0.007, 0.176, 0.357, 1.0], height_interval: (0.0, 0.4)},
+            Terrain {name: String::from("SoftWater"), color: [0.051, 0.286, 0.404, 1.0], height_interval: (0.4, 0.475)},
+            Terrain {name: String::from("Sand"), color: [0.98, 0.84, 0.45, 1.0], height_interval: (0.475, 0.5)},
+            Terrain {name: String::from("Grass"), color: [0.204, 0.412, 0.180, 1.0], height_interval: (0.5, 0.8)},
+            Terrain {name: String::from("Mountain"), color: [0.557, 0.541, 0.341, 1.0], height_interval: (0.8, 0.95)},
+            Terrain {name: String::from("SnowyPeak"), color: [1.0, 1.0, 1.0, 1.0], height_interval: (0.95, 10.0)},
+        ];
+
+        self.terrain_map = Map::<Terrain>::new(self.map_size, self.map_size, Terrain::default());
+        for i in 0..self.map_size {
+            for j in 0..self.map_size {
+                for terrain in terrain_list.iter() {
+                    let height = self.height_map[(i, j)];
+                    if height >= terrain.height_interval.0 && height < terrain.height_interval.1 {
+                        self.terrain_map[(i, j)] = (*terrain).clone();
+                    }
+                }
+            }
+        }
     }
 
     // Utility functions
@@ -482,7 +514,6 @@ impl Game<'_> {
                                         height_map: &self.height_map
                                     }, NullDistance2D{});
                                     if let Some(path) = path_res {
-                                        println!("There is a path from start to goal, length : {}", path.len());
                                         self.active_unit_planned_path = Some(path);
                                     }
                                     else {
@@ -539,6 +570,7 @@ impl Game<'_> {
             let view_move_i = self.view_in_map_height * view_move_in_view_size_ratio;
             let view_move_j = self.view_in_map_width * view_move_in_view_size_ratio;
             let n: f64 = 2.0;
+            println!("Touche");
             match key {
                 Key::Up | Key::Z => {
                     self.view_in_map_i = (self.view_in_map_i - view_move_i).max(-self.view_in_map_height / n);
@@ -562,10 +594,7 @@ impl Game<'_> {
                     self.look_at_overview();
                 },
                 Key::G => {
-                    self.height_map = noise_map(self.map_size, 
-                        vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0], 
-                        vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0], 
-                        4.0, false);
+                    self.generate_map();
                 },
                 Key::H => {
                     self.height_map = diamond_square(self.map_size);
@@ -625,7 +654,8 @@ impl Game<'_> {
                 let transform = c.transform.trans(x, y);
 
                 // Draw each grid cell
-                rectangle(self.h_to_color(self.height_map[(i as usize, j as usize)], true), cell, transform, self.gl.as_mut().unwrap());
+                // rectangle(self.h_to_color(self.height_map[(i as usize, j as usize)], true), cell, transform, self.gl.as_mut().unwrap());
+                rectangle(self.terrain_map[(i, j)].color, cell, transform, self.gl.as_mut().unwrap());
             }
         }
 
