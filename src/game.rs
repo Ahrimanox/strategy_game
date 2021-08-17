@@ -107,7 +107,7 @@ impl Game<'_> {
         self.generate_map();
 
         // Initialize players 
-        // TODO : Initialize base position for all players with clever algorithm --> NOT URGENT
+        // TODO : Initialize base position for all players with clever algorithm
         self.players = Vec::<Player>::new();
         self.players.push(Player::new([0, 0], [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
         self.players.push(Player::new([self.map_size - 1, self.map_size - 1], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
@@ -348,6 +348,8 @@ impl Game<'_> {
         self.active_unit_position = Some(new_active_unit_position);
     }
 
+    // FIXME : Fix bugs when unit moves, losing track of active unit and its position
+    // TODO : Reformat this part of code if possible
     fn moves(&mut self, destination: [usize; 2]) {
 
         // Get active unit position
@@ -698,6 +700,7 @@ impl Game<'_> {
         }
     }
 
+    // TODO : Adapt this old function to draw shortest-path tree provided by Dijkstra
     // fn render_unit_reachable_cells(&mut self, c: Context) {
     //     // Draw reachable mask at reachable cells by active unit if there is an active one
     //     if let Some(active_unit_position) = self.active_unit_position {
@@ -938,6 +941,7 @@ impl Game<'_> {
             }
         }
 
+        // TODO : Implement algorithm to draw territory borders
         // Initialize a processed/visited map
         // let mut processed_map = Map::<bool>::new(self.map_size, self.map_size, false);
 

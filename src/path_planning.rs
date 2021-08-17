@@ -36,6 +36,7 @@ impl PartialOrd for CostNode {
     }
 }
 
+// TODO : Make generic the concept of Neighborhood
 pub fn neighbours_4c(position: (i32, i32), map_size: (i32, i32)) -> Vec<(i32, i32)> {
     
     let mut neighbours = Vec::new();
@@ -87,7 +88,9 @@ pub fn reconstruct_path(current: (i32, i32), best_previous_node: HashMap<(i32, i
     total_path
 }
 
-
+// TODO : Pass constraints on certains positions (ex: obstacles, terrain that could be impractible by some unit and not not by others, etc)
+// TODO : Pass constraints on certains move (position transition/couples)
+// TODO : Implement Dijkstra instead of A* for making path finding routine faster, keep A* implementation for complex AI problem as an example of code
 pub fn astar_2d_map(start: (i32, i32), goal: (i32, i32), map_size: (i32, i32), distance: impl Distance2D, heuristic: impl Distance2D) -> Option<VecDeque<(i32, i32, f64)>> {
     // Initialize priority queue as min-binary heap
     // Structure holding potentially next nodes to explore 
