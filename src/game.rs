@@ -1,9 +1,24 @@
 use std::collections::VecDeque;
+use std::rc::Rc;
 
-use piston::input::{RenderArgs, RenderEvent, Event, MouseCursorEvent, PressEvent, Button, MouseButton, ReleaseEvent, MouseScrollEvent};
+use piston::input::{
+    RenderArgs, 
+    RenderEvent, 
+    Event, 
+    MouseCursorEvent, 
+    PressEvent, 
+    Button, 
+    MouseButton, 
+    ReleaseEvent, 
+    MouseScrollEvent
+};
+
 use piston::input::keyboard::Key;
 
-use opengl_graphics::{GlGraphics, GlyphCache};
+use opengl_graphics::{
+    GlGraphics, 
+    GlyphCache
+};
 
 use graphics::*;
 use graphics::rectangle::rectangle_by_corners;
@@ -12,9 +27,25 @@ use graphics::text::Text;
 use graphics::rectangle::Rectangle;
 use graphics::ellipse::Ellipse;
 
-use crate::map::{Map, diamond_square, noise_map};
-use crate::player::{Unit, Building, Player};
+use crate::utils::{
+    is_in_rect
+};
+
+use crate::map::{
+    Map, 
+    diamond_square, 
+    noise_map
+};
+
+// TODO : Change ownership of Unit -> Game owns Players that owns their Units via Rc and unit_map refers to them by Weak
+use crate::player::{
+    Unit, 
+    Building, 
+    Player
+};
+
 use crate::distance::{NullDistance2D, EuclideanDistanceWHeight2D};
+use crate::constraint::{TerrainConstraint};
 use crate::path_planning::astar_2d_map;
 
 // Structure used to holding terrain information
@@ -27,6 +58,15 @@ pub struct Terrain {
 
 impl Default for Terrain {
     fn default() -> Self {Terrain {name: String::from("None"), color: [0.0, 0.0, 0.0, 0.0], height_interval: (-1.0, -1.0)}}
+}
+
+impl PartialEq for Terrain {
+    fn eq(&self, other: &Self) -> bool {
+        if self.name != other.name {false}
+        else if self.color != other.color {false}
+        else if self.height_interval != other.height_interval {false}
+        else {true}
+    }
 }
 
 #[derive(Default)]
@@ -75,7 +115,7 @@ pub struct Game<'a> {
     pub height_map: Map<f64>,
 
     // Terrain map
-    pub terrain_map: Map<Terrain>,
+    pub terrain_map: Rc<Map<Terrain>>,
 
     pub color_ramp_value: Vec<f64>,
     pub color_ramp_color: Vec<[f32; 4]>,
@@ -90,7 +130,7 @@ pub struct Game<'a> {
     pub released_map_cell: Option<[usize; 2]>,
 }
 
-impl Game<'_> {
+impl<'a> Game<'a> {
     
     // Init game
     pub fn init(&mut self) {
@@ -189,11 +229,35 @@ impl Game<'_> {
         // Generate procedurally height map
         self.height_map = Map::<f64>::new(self.map_size, self.map_size, 0.0);
         self.height_map = noise_map(self.map_size, 
-            vec![1.0, 2.0,          4.0,        8.0,        16.0,       32.0,       64.0,       128.0], 
-            vec![1.0, 1.0 / 2.0,    1.0 / 4.0,  1.0 / 8.0,  1.0 / 16.0, 1.0 / 32.0, 1.0 / 64.0, 1.0 / 128.0], 
+            vec![
+                1.0, 
+                2.0,
+                4.0,
+                8.0,
+                16.0,
+                32.0,
+                64.0,
+                128.0,
+                256.0,
+                512.0
+                ], 
+            vec![
+                1.0, 
+                1.0 / 2.0, 
+                1.0 / 4.0, 
+                1.0 / 8.0, 
+                1.0 / 16.0, 
+                1.0 / 32.0, 
+                1.0 / 64.0, 
+                1.0 / 128.0, 
+                1.0 / 256.0,
+                1.0 / 512.0
+                ],
             1.0, false);
+        // self.height_map = diamond_square(self.map_size);
 
         // Assign Terrain to map cell according to cell height
+        // TODO : Pass terrain information by configuration file to reduce code complexity
         let terrain_list = [
             Terrain {name: String::from("DeepWater"), color: [0.007, 0.176, 0.357, 1.0], height_interval: (0.0, 0.4)},
             Terrain {name: String::from("SoftWater"), color: [0.051, 0.286, 0.404, 1.0], height_interval: (0.4, 0.475)},
@@ -203,13 +267,13 @@ impl Game<'_> {
             Terrain {name: String::from("SnowyPeak"), color: [1.0, 1.0, 1.0, 1.0], height_interval: (0.95, 10.0)},
         ];
 
-        self.terrain_map = Map::<Terrain>::new(self.map_size, self.map_size, Terrain::default());
+        self.terrain_map = Rc::new(Map::<Terrain>::new(self.map_size, self.map_size, Terrain::default()));
         for i in 0..self.map_size {
             for j in 0..self.map_size {
                 for terrain in terrain_list.iter() {
                     let height = self.height_map[(i, j)];
                     if height >= terrain.height_interval.0 && height < terrain.height_interval.1 {
-                        self.terrain_map[(i, j)] = (*terrain).clone();
+                        Rc::get_mut(&mut self.terrain_map).unwrap()[(i, j)] = (*terrain).clone();
                     }
                 }
             }
@@ -249,34 +313,16 @@ impl Game<'_> {
         (x, y)
     }
 
-    fn is_in_rect<T: PartialOrd>(&self, position: (T, T), rect: (T, T, T, T), inclusive_stop: bool) -> bool {
-        let (x, y) = position;
-        let (x0, y0, x1, y1) = rect;
-        
-        if x < x0 {return false;}
-        if y < y0 {return false;}
-        if inclusive_stop {
-            if x > x1 {return false;}
-            if y > y1 {return false;}
-        }
-        else {
-            if x >= x1 {return false;}
-            if y >= y1 {return false;}
-        }
-        
-        return true;
-    }
-
     fn is_in_window(&self, window_position: (f64, f64)) -> bool {
         let (x, y) = window_position;
         let window_rect = (0.0, 0.0, self.map_size as f64, self.map_size as f64);
-        self.is_in_rect((x, y), window_rect, true)
+        is_in_rect((x, y), window_rect, true)
     }
 
     fn is_in_map(&self, map_position: (i32, i32)) -> bool {
         let (i, j) = map_position;
         let map_rect = (0, 0, self.map_size as i32, self.map_size as i32);
-        self.is_in_rect((i, j), map_rect, false)
+        is_in_rect((i, j), map_rect, false)
     }
 
     fn h_to_color(&self, h: f64, interpolate: bool) -> [f32; 4] {
@@ -384,6 +430,7 @@ impl Game<'_> {
             // If there is an active planned path -> Execute it
             let mut previous_cost = 0.0;
             let mut last_position = active_unit_position;
+            // FIXME : Code panic when active_unit_planned_path == None
             for (i, j, cost) in self.active_unit_planned_path.as_ref().unwrap().clone().iter() {
                 
                 // Check if move is possible by checking updated remaining move
@@ -510,11 +557,37 @@ impl Game<'_> {
                                 // No underlying unit and active unit --> Possible moves
                                 else {
                                     // Compute "optimal" path from active unit position to the pointed position
+                                    
                                     let start = (apos.0 as i32, apos.1 as i32);
                                     let goal = (ci, cj);
-                                    let path_res = astar_2d_map(start, goal, (self.map_size as i32, self.map_size as i32), EuclideanDistanceWHeight2D{
+                                    let distance = EuclideanDistanceWHeight2D {
                                         height_map: &self.height_map
-                                    }, NullDistance2D{});
+                                    };
+                                    let heuristic = NullDistance2D {};
+                                    let water_constraint = Box::new(TerrainConstraint {
+                                        terrain_map: Rc::clone(&self.terrain_map),
+                                        impractical_terrains: vec![
+                                            Terrain {
+                                                name: String::from("DeepWater"), 
+                                                color: [0.007, 0.176, 0.357, 1.0], 
+                                                height_interval: (0.0, 0.4)
+                                            },
+                                            Terrain {
+                                                name: String::from("SoftWater"), 
+                                                color: [0.051, 0.286, 0.404, 1.0], 
+                                                height_interval: (0.4, 0.475)
+                                            }
+                                        ]
+                                    });
+
+                                    let path_res = astar_2d_map(
+                                        start, 
+                                        goal, 
+                                        (self.map_size as i32, self.map_size as i32), 
+                                        distance, 
+                                        heuristic,
+                                        vec![water_constraint],
+                                    );
                                     if let Some(path) = path_res {
                                         self.active_unit_planned_path = Some(path);
                                     }
@@ -572,7 +645,6 @@ impl Game<'_> {
             let view_move_i = self.view_in_map_height * view_move_in_view_size_ratio;
             let view_move_j = self.view_in_map_width * view_move_in_view_size_ratio;
             let n: f64 = 2.0;
-            println!("Touche");
             match key {
                 Key::Up | Key::Z => {
                     self.view_in_map_i = (self.view_in_map_i - view_move_i).max(-self.view_in_map_height / n);
@@ -593,6 +665,7 @@ impl Game<'_> {
                     self.execute_planned_path();
                 },
                 Key::R => {
+                    println!("Reset view");
                     self.look_at_overview();
                 },
                 Key::G => {
@@ -700,7 +773,7 @@ impl Game<'_> {
         }
     }
 
-    // TODO : Adapt this old function to draw shortest-path tree provided by Dijkstra
+    // TODO : Adapt this old function to draw shortest-path tree provided by future Dijkstra implementation
     // fn render_unit_reachable_cells(&mut self, c: Context) {
     //     // Draw reachable mask at reachable cells by active unit if there is an active one
     //     if let Some(active_unit_position) = self.active_unit_position {
@@ -757,9 +830,10 @@ impl Game<'_> {
 
                     let visible_map_bounds = self.visible_map_bounds();
                     
+                    // TODO : Don't draw the first position
                     let mut max_cost_in_turn = 0.0;
                     for (i, j, cost) in path.iter() {
-                        if self.is_in_rect((*i, *j), visible_map_bounds, false) {
+                        if is_in_rect((*i, *j), visible_map_bounds, false) {
                             let (x, y) = self.map_position_to_window_position((*i, *j));
                             let transform = c.transform.trans(x, y);
                             if (*cost - active_unit.remaining_moves as f64) < 0.0 {
@@ -890,7 +964,7 @@ impl Game<'_> {
 
         // Draw marker on active unit if there is one and if it is visible
         if let Some(active_unit_position) = self.active_unit_position {
-            if self.is_in_rect((active_unit_position[0] as i32, active_unit_position[1] as i32), visible_map_bounds, false) {
+            if is_in_rect((active_unit_position[0] as i32, active_unit_position[1] as i32), visible_map_bounds, false) {
                 let cell_padding_ratio = 1.0 / 2.5;
                 let marker_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
                 let marker_pix_height = cell_pix_height * (1.0 - cell_padding_ratio * 2.0);
