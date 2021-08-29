@@ -436,6 +436,13 @@ impl<'a> Game<'a> {
     }
 
     // View-related functions
+    fn view_center(&self) -> [f64; 2] {
+        [
+            self.view_in_map_i + self.view_in_map_height / 2.0,
+            self.view_in_map_j + self.view_in_map_width / 2.0
+        ]
+    }
+
     fn shift_view(&mut self, shift: [f64; 2]) {
         let frac =  1.0 / 2.0;
         self.view_in_map_i = 
