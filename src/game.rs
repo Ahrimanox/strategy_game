@@ -436,19 +436,6 @@ impl<'a> Game<'a> {
     }
 
     // View-related functions
-    fn look_at(&mut self, pos: [f64; 2]) {
-        // Extract grid coordinates
-        let (i, j) = (pos[0], pos[1]);
-
-        // Clip coordinates
-        let i = i.min(self.map_size as f64).max(0.0);
-        let j = j.min(self.map_size as f64).max(0.0);
-
-        // Shift view to look at specified grid position
-        self.view_in_map_i = i - self.view_in_map_height / 2.0;
-        self.view_in_map_j = j - self.view_in_map_width / 2.0;
-    }
-
     fn shift_view(&mut self, shift: [f64; 2]) {
         let frac =  1.0 / 2.0;
         self.view_in_map_i = 
@@ -460,6 +447,19 @@ impl<'a> Game<'a> {
             (self.view_in_map_j + shift[1])
             .max(-self.view_in_map_width * frac)
             .min(self.map_size as f64 - self.view_in_map_width * (1.0 - frac) - f64::EPSILON);
+    }
+
+    fn look_at(&mut self, pos: [f64; 2]) {
+        // Extract grid coordinates
+        let (i, j) = (pos[0], pos[1]);
+        
+        // Shift view
+        self.shift_view(
+            [
+                (i - self.view_in_map_height / 2.0) - self.view_in_map_i,
+                (j - self.view_in_map_width / 2.0) - self.view_in_map_j
+            ]
+        );
     }
 
     fn zoom(&mut self, scroll_factor: f64) {
