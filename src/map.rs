@@ -145,20 +145,20 @@ pub fn diamond_square(map_size: usize) -> Map<f64> {
     height_map
 }
 
-pub fn noise_map(map_size: usize, frequencies: Vec<f64>, frequencies_weight: Vec<f64>, power: f64, island: bool) -> Map<f64> {
+pub fn noise_map(map_size: usize, octaves_num: usize, lacunarity: f64, persistance: f64, power: f64, island: bool) -> Map<f64> {
     // Initialize noise map
     let mut noise_map: Map<f64> = Map::<f64>::new(map_size, map_size, 0.0);
-
-    // Normalize frequencies weight
-    let weights_sum: f64 = frequencies_weight.iter().sum();
 
     // Initialize random number generator
     let mut rng = rand::thread_rng();
 
-    // Initialize a SuperSimplex
+    // Initialize a SuperSimplex noise generator
     let mut noise_gen = SuperSimplex::new();
 
-    for (f, w) in frequencies.iter().zip(frequencies_weight.iter()) {
+    for octave in 0..(octaves_num as i32) {
+        let f = lacunarity.powi(octave);
+        let w = 1.0 / persistance.powi(octave);
+
         // Set a different seed for each ferquency
         noise_gen = noise_gen.set_seed(rng.gen());
 
@@ -172,25 +172,24 @@ pub fn noise_map(map_size: usize, frequencies: Vec<f64>, frequencies_weight: Vec
         }
     }
 
-    // Normalize by frequecy weight sum
-    noise_map.map = noise_map.map.iter().map(|x| x / weights_sum).collect();
-
-    // Take the power of noise map to make sharper and smoother noise map
-    noise_map.map = noise_map.map.iter().map(|x| (*x).powf(power)).collect();
+    // Normalize noise map
+    noise_map.normalize();
 
     if island {
         // Apply island transform to map
-        let _half = (map_size / 2) as f64;
+        let half = (map_size - 1) as f64 / 2.0;
+        let dmax = (half.powi(2) * 2.0).sqrt();
         for i in 0..(map_size as i32) {
-            // let wi = 1.0 - ((i as f64 - half).abs() / half);
             for j in 0..(map_size as i32) {
-                let ni = ((i as f64 + 0.5) / map_size as f64) - 0.5;
-                let nj = ((j as f64 + 0.5) / map_size as f64) - 0.5;
-                let d = (ni.powi(2) + nj.powi(2)).sqrt() / 0.5_f64.sqrt();
-                noise_map[(i, j)] = (1.0 + noise_map[(i, j)] - d) / 2.0;
+                let d = ((i as f64 - half).powi(2) + (j as f64 - half).powi(2)).sqrt();
+                noise_map[(i, j)] *= -d / dmax + 1.0;
+                // noise_map[(i, j)] *= (1.0 / d) / (1.0 / dmax);
             }
         }
     }
+
+    // Take the power of noise map to make sharper and smoother noise map
+    noise_map.map = noise_map.map.iter().map(|x| (*x).powf(power)).collect();
 
     // Normalize noise map
     noise_map.normalize();

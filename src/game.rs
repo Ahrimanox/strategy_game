@@ -228,33 +228,15 @@ impl<'a> Game<'a> {
 
         // Generate procedurally height map
         self.height_map = Map::<f64>::new(self.map_size, self.map_size, 0.0);
-        self.height_map = noise_map(self.map_size, 
-            vec![
-                1.0, 
-                2.0,
-                4.0,
-                8.0,
-                16.0,
-                32.0,
-                64.0,
-                128.0,
-                256.0,
-                512.0
-                ], 
-            vec![
-                1.0, 
-                1.0 / 2.0, 
-                1.0 / 4.0, 
-                1.0 / 8.0, 
-                1.0 / 16.0, 
-                1.0 / 32.0, 
-                1.0 / 64.0, 
-                1.0 / 128.0, 
-                1.0 / 256.0,
-                1.0 / 512.0
-                ],
-            1.0, false);
-        // self.height_map = diamond_square(self.map_size);
+        let lacunarity = 2.0;
+        self.height_map = noise_map(
+            self.map_size,
+            16,
+            lacunarity,
+            lacunarity, 
+            1.0, 
+            false
+        );
 
         // Assign Terrain to map cell according to cell height
         // TODO : Pass terrain information by configuration file to reduce code complexity
@@ -467,6 +449,46 @@ impl<'a> Game<'a> {
         self.view_in_map_j = j - self.view_in_map_width / 2.0;
     }
 
+    fn shift_view(&mut self, shift: [f64; 2]) {
+        let frac =  1.0 / 2.0;
+        self.view_in_map_i = 
+            (self.view_in_map_i + shift[0])
+            .max(-self.view_in_map_height * frac)
+            .min(self.map_size as f64 - self.view_in_map_height * (1.0 - frac) - f64::EPSILON);
+        
+        self.view_in_map_j = 
+            (self.view_in_map_j + shift[1])
+            .max(-self.view_in_map_width * frac)
+            .min(self.map_size as f64 - self.view_in_map_width * (1.0 - frac) - f64::EPSILON);
+    }
+
+    fn zoom(&mut self, scroll_factor: f64) {
+        let (view_center_in_map_i, view_center_in_map_j) = (
+            self.view_in_map_i + self.view_in_map_height / 2.0, 
+            self.view_in_map_j + self.view_in_map_width / 2.0
+        );
+
+        if scroll_factor == 1.0 {
+            let new_view_in_map_width = self.view_in_map_width / 2.0;
+            let new_view_in_map_height = self.view_in_map_height / 2.0;
+            if new_view_in_map_width > 3.0 && new_view_in_map_height > 3.0 {
+                self.view_in_map_width = new_view_in_map_width;
+                self.view_in_map_height = new_view_in_map_height;
+                self.view_in_map_i = view_center_in_map_i - self.view_in_map_height / 2.0;
+                self.view_in_map_j = view_center_in_map_j - self.view_in_map_width / 2.0;
+            }
+        }
+
+        else if scroll_factor == -1.0 {
+            let new_view_in_map_width = self.view_in_map_width * 2.0;
+            let new_view_in_map_height = self.view_in_map_height * 2.0;
+            self.view_in_map_width = new_view_in_map_width;
+            self.view_in_map_height = new_view_in_map_height;
+            self.view_in_map_i = view_center_in_map_i - self.view_in_map_height / 2.0;
+            self.view_in_map_j = view_center_in_map_j - self.view_in_map_width / 2.0;
+        }
+    }
+
     fn look_at_overview(&mut self) {
         self.view_in_map_width = self.map_size as f64;
         self.view_in_map_height = self.map_size as f64;
@@ -644,19 +666,18 @@ impl<'a> Game<'a> {
             let view_move_in_view_size_ratio: f64 = 0.1;
             let view_move_i = self.view_in_map_height * view_move_in_view_size_ratio;
             let view_move_j = self.view_in_map_width * view_move_in_view_size_ratio;
-            let n: f64 = 2.0;
             match key {
                 Key::Up | Key::Z => {
-                    self.view_in_map_i = (self.view_in_map_i - view_move_i).max(-self.view_in_map_height / n);
+                    self.shift_view([-view_move_i, 0.0]);
                 },
                 Key::Down | Key::S => {
-                    self.view_in_map_i = (self.view_in_map_i + view_move_i).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
+                    self.shift_view([view_move_i, 0.0]);
                 },
                 Key::Left | Key::Q => {
-                    self.view_in_map_j = (self.view_in_map_j - view_move_j).max(-self.view_in_map_width / n);
+                    self.shift_view([0.0, -view_move_j]);
                 },
                 Key::Right | Key::D => {
-                    self.view_in_map_j = (self.view_in_map_j + view_move_j).min(self.map_size as f64 - (1.0 - (1.0 / n)) * self.view_in_map_height);
+                    self.shift_view([0.0, view_move_j]);
                 },
                 Key::T => {
                     self.turn();
@@ -665,7 +686,6 @@ impl<'a> Game<'a> {
                     self.execute_planned_path();
                 },
                 Key::R => {
-                    println!("Reset view");
                     self.look_at_overview();
                 },
                 Key::G => {
@@ -681,31 +701,7 @@ impl<'a> Game<'a> {
         // Mouse scroll event
         if let Some(args) = event.mouse_scroll_args() {
             let (_scroll_x, scroll_y) = (args[0], args[1]);
-
-            let (view_center_in_map_i, view_center_in_map_j) = (
-                self.view_in_map_i + self.view_in_map_height / 2.0, 
-                self.view_in_map_j + self.view_in_map_width / 2.0
-            );
-
-            if scroll_y == 1.0 {
-                let new_view_in_map_width = self.view_in_map_width / 2.0;
-                let new_view_in_map_height = self.view_in_map_height / 2.0;
-                if new_view_in_map_width > 3.0 && new_view_in_map_height > 3.0 {
-                    self.view_in_map_width = new_view_in_map_width;
-                    self.view_in_map_height = new_view_in_map_height;
-                    self.view_in_map_i = view_center_in_map_i - self.view_in_map_height / 2.0;
-                    self.view_in_map_j = view_center_in_map_j - self.view_in_map_width / 2.0;
-                }
-            }
-
-            else if scroll_y == -1.0 {
-                let new_view_in_map_width = self.view_in_map_width * 2.0;
-                let new_view_in_map_height = self.view_in_map_height * 2.0;
-                self.view_in_map_width = new_view_in_map_width;
-                self.view_in_map_height = new_view_in_map_height;
-                self.view_in_map_i = view_center_in_map_i - self.view_in_map_height / 2.0;
-                self.view_in_map_j = view_center_in_map_j - self.view_in_map_width / 2.0;
-            }
+            self.zoom(scroll_y);
         }
 
         if let Some(args) = event.render_args() {
@@ -729,7 +725,6 @@ impl<'a> Game<'a> {
                 let transform = c.transform.trans(x, y);
 
                 // Draw each grid cell
-                // rectangle(self.h_to_color(self.height_map[(i as usize, j as usize)], true), cell, transform, self.gl.as_mut().unwrap());
                 rectangle(self.terrain_map[(i, j)].color, cell, transform, self.gl.as_mut().unwrap());
             }
         }
