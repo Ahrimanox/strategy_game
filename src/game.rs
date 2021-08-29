@@ -216,10 +216,6 @@ impl<'a> Game<'a> {
         }
 
         // Look at active player base position
-        // let active_player_base_position = self.players[self.active_player].base_position;
-        // self.view_in_map_width = 32.0;
-        // self.view_in_map_height = 32.0;
-        // self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
         self.look_at_overview();
     }
 
@@ -502,6 +498,11 @@ impl<'a> Game<'a> {
         self.look_at([self.map_size as f64 / 2.0, self.map_size as f64 / 2.0]);
     }
 
+    fn look_at_active_user_base(&mut self) {
+        let active_player_base_position = self.players[self.active_player].base_position;
+        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+    }
+
     // Event and Update methods
     pub fn process_event(&mut self, event: Event) {
 
@@ -694,6 +695,9 @@ impl<'a> Game<'a> {
                 },
                 Key::R => {
                     self.look_at_overview();
+                },
+                Key::B => {
+                    self.look_at_active_user_base();
                 },
                 Key::G => {
                     self.generate_map();
