@@ -827,7 +827,7 @@ impl<'a> Game<'a> {
                     
                     // TODO : Don't draw the first position
                     let mut max_cost_in_turn = 0.0;
-                    for (i, j, cost) in path.iter() {
+                    for (i, j, cost) in path.iter().skip(1) {
                         if is_in_rect((*i, *j), visible_map_bounds, false) {
                             let (x, y) = self.map_position_to_window_position((*i, *j));
                             let transform = c.transform.trans(x, y);
