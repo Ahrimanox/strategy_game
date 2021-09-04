@@ -237,12 +237,12 @@ impl<'a> Game<'a> {
         // Assign Terrain to map cell according to cell height
         // TODO : Pass terrain information by configuration file to reduce code complexity
         let terrain_list = [
-            Terrain {name: String::from("DeepWater"), color: [0.007, 0.176, 0.357, 1.0], height_interval: (0.0, 0.4)},
-            Terrain {name: String::from("SoftWater"), color: [0.051, 0.286, 0.404, 1.0], height_interval: (0.4, 0.475)},
-            Terrain {name: String::from("Sand"), color: [0.98, 0.84, 0.45, 1.0], height_interval: (0.475, 0.5)},
-            Terrain {name: String::from("Grass"), color: [0.204, 0.412, 0.180, 1.0], height_interval: (0.5, 0.8)},
-            Terrain {name: String::from("Mountain"), color: [0.557, 0.541, 0.341, 1.0], height_interval: (0.8, 0.95)},
-            Terrain {name: String::from("SnowyPeak"), color: [1.0, 1.0, 1.0, 1.0], height_interval: (0.95, 10.0)},
+            Terrain {name: String::from("DeepWater"), color: [0.007, 0.176, 0.357, 1.0], height_interval: (0.0, 0.2)},
+            Terrain {name: String::from("CoastalWater"), color: [0.051, 0.286, 0.404, 1.0], height_interval: (0.2, 0.275)},
+            Terrain {name: String::from("Sand"), color: [0.98, 0.84, 0.45, 1.0], height_interval: (0.275, 0.3)},
+            Terrain {name: String::from("Grass"), color: [0.204, 0.412, 0.180, 1.0], height_interval: (0.3, 0.7)},
+            Terrain {name: String::from("Mountain"), color: [0.557, 0.541, 0.341, 1.0], height_interval: (0.7, 0.90)},
+            Terrain {name: String::from("SnowyPeak"), color: [1.0, 1.0, 1.0, 1.0], height_interval: (0.90, 1.0 + 0.01)},
         ];
 
         self.terrain_map = Rc::new(Map::<Terrain>::new(self.map_size, self.map_size, Terrain::default()));
@@ -343,10 +343,10 @@ impl<'a> Game<'a> {
 
         // Update active player, active unit position and active planned path
         self.active_player = (self.active_player + 1) % self.player_num;
-        // let active_player_base_position = self.players[self.active_player].base_position;
-        // self.view_in_map_width = 16.0;
-        // self.view_in_map_height = 16.0;
-        // self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+        let active_player_base_position = self.players[self.active_player].base_position;
+        self.view_in_map_width = 32.0;
+        self.view_in_map_height = 32.0;
+        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
         self.deactivate_active_unit();
 
         // Restore all moves of current active player units
@@ -408,19 +408,20 @@ impl<'a> Game<'a> {
             // If there is an active planned path -> Execute it
             let mut previous_cost = 0.0;
             let mut last_position = active_unit_position;
-            // FIXME : Code panic when active_unit_planned_path == None
-            for (i, j, cost) in self.active_unit_planned_path.as_ref().unwrap().clone().iter() {
+            if let Some(active_unit_planned_path) = &self.active_unit_planned_path {
+                for (i, j, cost) in active_unit_planned_path.clone().iter() {
                 
-                // Check if move is possible by checking updated remaining move
-                if remaining_moves >= (*cost - previous_cost) {
-                    remaining_moves -= *cost - previous_cost;
-                    self.moves([*i as usize, *j as usize]);
-                    self.takes_territory((*i as usize, *j as usize));
-                    last_position = [*i as usize, *j as usize];
-                    previous_cost = *cost;
+                    // Check if move is possible by checking updated remaining move
+                    if remaining_moves >= (*cost - previous_cost) {
+                        remaining_moves -= *cost - previous_cost;
+                        self.moves([*i as usize, *j as usize]);
+                        self.takes_territory((*i as usize, *j as usize));
+                        last_position = [*i as usize, *j as usize];
+                        previous_cost = *cost;
+                    }
                 }
             }
-
+            
             // Reset active unit planned path
             self.active_unit_planned_path = None;
 
@@ -584,18 +585,19 @@ impl<'a> Game<'a> {
                                         height_map: &self.height_map
                                     };
                                     let heuristic = NullDistance2D {};
+                                    // TODO : Create a Game attribute, "terrains" and make reference to it to avoid inconsistency
                                     let water_constraint = Box::new(TerrainConstraint {
                                         terrain_map: Rc::clone(&self.terrain_map),
                                         impractical_terrains: vec![
                                             Terrain {
                                                 name: String::from("DeepWater"), 
                                                 color: [0.007, 0.176, 0.357, 1.0], 
-                                                height_interval: (0.0, 0.4)
+                                                height_interval: (0.0, 0.2)
                                             },
                                             Terrain {
-                                                name: String::from("SoftWater"), 
+                                                name: String::from("CoastalWater"), 
                                                 color: [0.051, 0.286, 0.404, 1.0], 
-                                                height_interval: (0.4, 0.475)
+                                                height_interval: (0.2, 0.275)
                                             }
                                         ]
                                     });
