@@ -466,30 +466,20 @@ impl<'a> Game<'a> {
     }
 
     fn zoom(&mut self, scroll_factor: f64) {
-        let (view_center_in_map_i, view_center_in_map_j) = (
-            self.view_in_map_i + self.view_in_map_height / 2.0, 
-            self.view_in_map_j + self.view_in_map_width / 2.0
-        );
+        let view_center = self.view_center();
+        let (view_center_in_map_i, view_center_in_map_j) = (view_center[0], view_center[1]);
 
         if scroll_factor == 1.0 {
-            let new_view_in_map_width = self.view_in_map_width / 2.0;
-            let new_view_in_map_height = self.view_in_map_height / 2.0;
-            if new_view_in_map_width > 3.0 && new_view_in_map_height > 3.0 {
-                self.view_in_map_width = new_view_in_map_width;
-                self.view_in_map_height = new_view_in_map_height;
-                self.view_in_map_i = view_center_in_map_i - self.view_in_map_height / 2.0;
-                self.view_in_map_j = view_center_in_map_j - self.view_in_map_width / 2.0;
-            }
+            self.view_in_map_height = (self.view_in_map_height / 2.0).max(3.0);
+            self.view_in_map_width = (self.view_in_map_width / 2.0).max(3.0);
+        }
+        else if scroll_factor == -1.0 {
+            self.view_in_map_height = (self.view_in_map_height * 2.0).min(2.0 * self.map_size as f64);
+            self.view_in_map_width = (self.view_in_map_width * 2.0).min(2.0 * self.map_size as f64);
         }
 
-        else if scroll_factor == -1.0 {
-            let new_view_in_map_width = self.view_in_map_width * 2.0;
-            let new_view_in_map_height = self.view_in_map_height * 2.0;
-            self.view_in_map_width = new_view_in_map_width;
-            self.view_in_map_height = new_view_in_map_height;
-            self.view_in_map_i = view_center_in_map_i - self.view_in_map_height / 2.0;
-            self.view_in_map_j = view_center_in_map_j - self.view_in_map_width / 2.0;
-        }
+        self.view_in_map_i = view_center_in_map_i - self.view_in_map_height / 2.0;
+        self.view_in_map_j = view_center_in_map_j - self.view_in_map_width / 2.0;
     }
 
     fn look_at_overview(&mut self) {
