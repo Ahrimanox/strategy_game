@@ -65,11 +65,14 @@ const _NEIGHBORS_DIRECTION_8C: [(i32, i32); 8] = [
 /// * `position` - From which position neighbors search is made
 /// * `map_size` - Map size / dimensions used to restrict possible neighbors that go out the map scope
 /// * `allowed_directions` - Allowed directions for finding neighbors / Definition of the neighbourhood
-/// * `position_constraints` - Position constraints that each neighbour must respect to be taken
+/// * `way_position_constraints` - Position constraints that each neighbour must respect to be taken
 /// 
 pub fn neighbors(
-    // Start position
+    // Start position from those neighbors will be computed
     position: (i32, i32), 
+
+    // Hypothetic goal
+    goal: (i32, i32),
 
     // Map size / dimensions
     map_size: (i32, i32),
@@ -77,8 +80,11 @@ pub fn neighbors(
     // Allowed direction to find neighbors
     allowed_directions: &[(i32, i32)],
 
-    // List of position constraints that each neighbour must respect
-    position_constraints: &[Box<dyn PositionConstraint>]
+    // List of position constraints that each neighbour must respect except the goal
+    way_position_constraints: &[Box<dyn PositionConstraint>],
+
+    // List of position constraints that each goal neighbour must respect
+    goal_position_constraints: &[Box<dyn PositionConstraint>]
 
 ) -> Vec<(i32, i32)> {
     
@@ -87,7 +93,11 @@ pub fn neighbors(
         .into_iter()
         .map(|d| (position.0 + d.0, position.1 + d.1))
         .filter(|&x| is_in_rect(x, (0, 0, map_size.0, map_size.1), false))
-        .filter(|&x| position_constraints.iter().all(|pc| pc.respect((x.0 as usize, x.1 as usize))))
+        .filter(
+            |&x| 
+            ((x == goal) && (goal_position_constraints.iter().all(|gpc| gpc.respect((x.0 as usize, x.1 as usize))))) ||
+            ((x != goal) && (way_position_constraints.iter().all(|pc| pc.respect((x.0 as usize, x.1 as usize)))))
+        )
         .collect()
 }
 
@@ -118,7 +128,8 @@ pub fn astar_2d_map(
     map_size: (i32, i32), 
     distance: impl Distance2D, 
     heuristic: impl Distance2D,
-    position_constraints: Vec<Box<dyn PositionConstraint>>
+    way_position_constraints: Vec<Box<dyn PositionConstraint>>,
+    goal_position_constraints: Vec<Box<dyn PositionConstraint>>,
 ) -> Option<VecDeque<(i32, i32, f64)>> {
 
     // Initialize priority queue as min-binary heap
@@ -154,7 +165,7 @@ pub fn astar_2d_map(
         open_set.remove(&current.position);
 
         // Visit each neighbour of current node to explore and find cheapest paths
-        for neighbour in &neighbors(current.position, map_size, &NEIGHBORS_DIRECTION_4C, &position_constraints) {
+        for neighbour in &neighbors(current.position, goal, map_size, &NEIGHBORS_DIRECTION_4C, &way_position_constraints, &goal_position_constraints) {
             let current_to_neighbour_distance = distance.evaluate((current_pos.0 as f64, current_pos.1 as f64), (neighbour.0 as f64, neighbour.1 as f64));
             let tentative_distance_from_start = distance_from_start[&current_pos] + current_to_neighbour_distance;
 

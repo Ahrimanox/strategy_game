@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
-use std::rc::Rc;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
 use piston::input::{
     RenderArgs, 
@@ -38,14 +39,14 @@ use crate::map::{
 };
 
 // TODO : Change ownership of Unit -> Game owns Players that owns their Units via Rc and unit_map refers to them by Weak
-use crate::player::{
+pub use crate::player::{
     Unit, 
     Building, 
     Player
 };
 
 use crate::distance::{NullDistance2D, EuclideanDistanceWHeight2D};
-use crate::constraint::{TerrainConstraint};
+use crate::constraint::{TerrainConstraint, UnitConstraint};
 use crate::path_planning::astar_2d_map;
 
 // Structure used to holding terrain information
@@ -70,11 +71,11 @@ impl PartialEq for Terrain {
 }
 
 #[derive(Default)]
-pub struct Game<'a> {
+pub struct Game<'g> {
 
     // Rendering attributes
     pub gl: Option<GlGraphics>,
-    pub glyphs: Option<GlyphCache<'a>>,
+    pub glyphs: Option<GlyphCache<'g>>,
 
     pub background_color: [f32; 4],
     pub grid_line_color: [f32; 4],
@@ -103,10 +104,10 @@ pub struct Game<'a> {
     pub players: Vec<Player>,
 
     // Building map (hold building for each position in the map
-    pub building_map: Map<Option<Building>>,
+    pub building_map: Rc<RefCell<Map<Weak<RefCell<Building>>>>>,
 
     // Unit map (hold Unit for each position in the map
-    pub unit_map: Map<Option<Unit>>,
+    pub unit_map: Rc<RefCell<Map<Weak<RefCell<Unit>>>>>,
 
     // Territory map
     pub territory_map: Map<usize>,
@@ -115,13 +116,13 @@ pub struct Game<'a> {
     pub height_map: Map<f64>,
 
     // Terrain map
-    pub terrain_map: Rc<Map<Terrain>>,
+    pub terrain_map: Rc<RefCell<Map<Terrain>>>,
 
     pub color_ramp_value: Vec<f64>,
     pub color_ramp_color: Vec<[f32; 4]>,
 
     pub active_player: usize,
-    pub active_unit_position: Option<[usize; 2]>,
+    pub active_unit: Weak<RefCell<Unit>>,
     pub active_unit_planned_path: Option<VecDeque<(i32, i32, f64)>>,
     pub current_mouse_position: Option<[f64; 2]>,
 
@@ -130,7 +131,7 @@ pub struct Game<'a> {
     pub released_map_cell: Option<[usize; 2]>,
 }
 
-impl<'a> Game<'a> {
+impl<'g> Game<'g> {
     
     // Init game
     pub fn init(&mut self) {
@@ -139,103 +140,134 @@ impl<'a> Game<'a> {
         self.map_size = (2 as usize).pow(4+self.map_size_level)+1;
 
         // Initialize unit map and building map with None
-        self.unit_map = Map::<Option<Unit>>::new(self.map_size, self.map_size, None);
-        self.building_map = Map::<Option<Building>>::new(self.map_size, self.map_size, None);
-        self.territory_map = Map::<usize>::new(self.map_size, self.map_size, self.player_num);
+        self.unit_map = Rc::new(RefCell::new(Map::<Weak<RefCell<Unit>>>::new(self.map_size, self.map_size, Weak::new())));
+        self.building_map = Rc::new(RefCell::new(Map::<Weak<RefCell<Building>>>::new(self.map_size, self.map_size, Weak::new())));
+        self.territory_map = Map::new(self.map_size, self.map_size, self.player_num);
 
         // Generation of playable map
         self.generate_map();
 
         // Initialize players 
         // TODO : Initialize base position for all players with clever algorithm
-        self.players = Vec::<Player>::new();
-        self.players.push(Player::new([0, 0], [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
-        self.players.push(Player::new([self.map_size - 1, self.map_size - 1], [0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]));
+        self.players = Vec::new();
+        self.players.push(
+            Player::new(
+                0, 
+                (0, 0), 
+                [1.0, 0.0, 0.0, 1.0], 
+                [0.0, 0.0, 0.0, 1.0]
+            )
+        );
+        self.players.push(
+            Player::new(
+                1, 
+                (self.map_size - 1, self.map_size - 1), 
+                [0.0, 0.0, 1.0, 1.0], 
+                [0.0, 0.0, 0.0, 1.0]
+            )
+        );
+
+        // Add reference to player buildings in buildings map
+        for player in &self.players {
+            for building in &player.buildings {
+                (self.building_map.borrow_mut())[building.borrow().position] = Rc::downgrade(&building);
+                self.territory_map[building.borrow().position] = building.borrow().player;
+            }
+        }
+
+        // Add first units
+        // TODO : Make a function to generate unit near to base building
+        self.players[0].units.push(
+            Rc::new(
+                RefCell::new(
+                    Unit {
+                        player: 0,
+                        position: (0, 1),
+                        damage: 1.0,
+                        health: 1.0,
+                        speed: self.unit_default_speed,
+                        remaining_moves: self.unit_default_speed
+                    }
+                )
+            )
+        );
+        self.players[0].units.push(
+            Rc::new(
+                RefCell::new(
+                    Unit {
+                        player: 0,
+                        position: (1, 0),
+                        damage: 1.0,
+                        health: 1.0,
+                        speed: self.unit_default_speed,
+                        remaining_moves: self.unit_default_speed
+                    }
+                )
+            )
+        );
+
+        self.players[1].units.push(
+            Rc::new(
+                RefCell::new(
+                    Unit {
+                        player: 1,
+                        position: (self.map_size - 1, self.map_size - 2),
+                        damage: 1.0,
+                        health: 1.0,
+                        speed: self.unit_default_speed,
+                        remaining_moves: self.unit_default_speed
+                    }
+                )
+            )
+        );
+        self.players[1].units.push(
+            Rc::new(
+                RefCell::new(
+                    Unit {
+                        player: 1,
+                        position: (self.map_size - 2, self.map_size - 1),
+                        damage: 1.0,
+                        health: 1.0,
+                        speed: self.unit_default_speed,
+                        remaining_moves: self.unit_default_speed
+                    }
+                )
+            )
+        );
+       
+        // Add reference to player units in units map
+        for player in &self.players {
+            for unit in &player.units {
+                (self.unit_map.borrow_mut())[unit.borrow().position] = Rc::downgrade(unit);
+                self.territory_map[unit.borrow().position] = unit.borrow().player;
+            }
+        }
 
         // Let the first player be the current active player
         self.active_player = 0;
 
-        // Add "base" buildings
-        let mut buildings_to_add = Vec::new();
-        buildings_to_add.push(Building {
-            player: 0,
-            position: [0, 0],
-            damage: 0,
-            health: 1
-        });
-        buildings_to_add.push(Building {
-            player: 1,
-            position: [self.map_size - 1, self.map_size - 1],
-            damage: 0,
-            health: 1
-        });
-        for building in buildings_to_add.drain(..) {
-            self.building_map[(building.position[0], building.position[1])] = Some(building);
-            self.territory_map[(building.position[0], building.position[1])] = building.player;
-        }
-
-        // Add first units
-        let mut units_to_add = Vec::new();
-        units_to_add.push(Unit {
-            player: 0,
-            position: [0, 1],
-            damage: 1.0,
-            health: 1.0,
-            speed: self.unit_default_speed,
-            remaining_moves: self.unit_default_speed
-        });
-        units_to_add.push(Unit {
-            player: 0,
-            position: [1, 0],
-            damage: 1.0,
-            health: 1.0,
-            speed: self.unit_default_speed,
-            remaining_moves: self.unit_default_speed
-        });
-        units_to_add.push(Unit {
-            player: 1,
-            position: [self.map_size - 1, self.map_size - 2],
-            damage: 1.0,
-            health: 1.0,
-            speed: self.unit_default_speed,
-            remaining_moves: self.unit_default_speed
-        });
-        units_to_add.push(Unit {
-            player: 1,
-            position: [self.map_size - 2, self.map_size - 1],
-            damage: 1.0,
-            health: 1.0,
-            speed: self.unit_default_speed,
-            remaining_moves: self.unit_default_speed
-        });
-
-        // Add units to unit map 
-        for unit in units_to_add.drain(..) {
-            self.unit_map[(unit.position[0], unit.position[1])] = Some(unit);
-            self.territory_map[(unit.position[0], unit.position[1])] = unit.player;
-        }
-
         // Look at active player base position
-        self.look_at_overview();
+        self.look_at_active_user_base();
     }
 
     // Map generation function
     pub fn generate_map(&mut self) {
 
         // Generate procedurally height map
-        self.height_map = Map::<f64>::new(self.map_size, self.map_size, 0.0);
+        self.height_map = Map::new(self.map_size, self.map_size, 0.0);
         let lacunarity = 2.0;
         self.height_map = noise_map(
             self.map_size,
             16,
             lacunarity,
             lacunarity, 
-            1.0, 
+            2.0, 
             false
         );
 
         // Assign Terrain to map cell according to cell height
         // TODO : Pass terrain information by configuration file to reduce code complexity
+        // TODO : Create Game attribute with all possible Terrain
         let terrain_list = [
             Terrain {name: String::from("DeepWater"), color: [0.007, 0.176, 0.357, 1.0], height_interval: (0.0, 0.2)},
             Terrain {name: String::from("CoastalWater"), color: [0.051, 0.286, 0.404, 1.0], height_interval: (0.2, 0.275)},
@@ -245,13 +277,13 @@ impl<'a> Game<'a> {
             Terrain {name: String::from("SnowyPeak"), color: [1.0, 1.0, 1.0, 1.0], height_interval: (0.90, 1.0 + 0.01)},
         ];
 
-        self.terrain_map = Rc::new(Map::<Terrain>::new(self.map_size, self.map_size, Terrain::default()));
+        self.terrain_map = Rc::new(RefCell::new(Map::<Terrain>::new(self.map_size, self.map_size, Terrain::default())));
         for i in 0..self.map_size {
             for j in 0..self.map_size {
                 for terrain in terrain_list.iter() {
                     let height = self.height_map[(i, j)];
                     if height >= terrain.height_interval.0 && height < terrain.height_interval.1 {
-                        Rc::get_mut(&mut self.terrain_map).unwrap()[(i, j)] = (*terrain).clone();
+                        self.terrain_map.borrow_mut()[(i, j)] = (*terrain).clone();
                     }
                 }
             }
@@ -341,52 +373,49 @@ impl<'a> Game<'a> {
     // Gameplay functions
     fn turn(&mut self) {
 
-        // Update active player, active unit position and active planned path
+        // Update active player and reset active unit
         self.active_player = (self.active_player + 1) % self.player_num;
-        let active_player_base_position = self.players[self.active_player].base_position;
-        self.view_in_map_width = 32.0;
-        self.view_in_map_height = 32.0;
-        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+
         self.deactivate_active_unit();
 
+        self.look_at_active_user_base();
+
         // Restore all moves of current active player units
-        for unit in self.unit_map.map.iter_mut() {
-            if let Some(unit) = unit {
-                if unit.player == self.active_player {
-                    unit.remaining_moves = unit.speed;
-                }
+        for player in &self.players {
+            for unit in &player.units {
+                let speed = unit.borrow().speed;
+                unit.borrow_mut().remaining_moves = speed;
             }
         }
     }
 
     fn deactivate_active_unit(&mut self) {
         self.active_unit_planned_path = None;
-        self.active_unit_position = None;
+        self.active_unit = Weak::new();
     }
 
-    fn activate_unit(&mut self, new_active_unit_position: [usize; 2]) {
+    fn activate_unit(&mut self, new_active_unit_position: (usize, usize)) {
         // First deactivate active unit if there is one
         self.deactivate_active_unit();
 
         // Activate unit by storing its position
-        self.active_unit_position = Some(new_active_unit_position);
+        self.active_unit = self.unit_map.borrow()[new_active_unit_position].clone();
     }
+        
 
     // FIXME : Fix bugs when unit moves, losing track of active unit and its position
     // TODO : Reformat this part of code if possible
-    fn moves(&mut self, destination: [usize; 2]) {
+    fn moves(&mut self, destination: (usize, usize)) {
 
         // Get active unit position
-        if let Some(active_unit_position) = self.active_unit_position {
+        if let Some(active_unit) = self.active_unit.upgrade() {
             
-            // Make the moves by swapping element
-            self.unit_map.swap((active_unit_position[0], active_unit_position[1]), (destination[0], destination[1]));
+            // Make the moves
+            self.unit_map.borrow_mut()[active_unit.borrow().position] = Weak::new();
+            self.unit_map.borrow_mut()[destination] = self.active_unit.clone();
             
             // Update active unit position attribute
-            if let Some(active_unit) = &mut self.unit_map[(destination[0], destination[1])] {
-                active_unit.position = destination;
-                self.active_unit_position = Some(destination);
-            }
+            active_unit.borrow_mut().position = destination;
         }
     }
 
@@ -397,26 +426,22 @@ impl<'a> Game<'a> {
     fn execute_planned_path(&mut self) {
         
         // Check if there is an active unit by taking active unit position
-        if let Some(active_unit_position) = self.active_unit_position {
+        if let Some(active_unit) = self.active_unit.upgrade() {
 
-            let apos = (active_unit_position[0], active_unit_position[1]);
-            let mut remaining_moves = 0.0;
-            if let Some(active_unit) = self.unit_map[apos] {
-                remaining_moves = active_unit.remaining_moves;
-            }
+            let mut remaining_moves = active_unit.borrow().remaining_moves;
 
             // If there is an active planned path -> Execute it
             let mut previous_cost = 0.0;
-            let mut last_position = active_unit_position;
             if let Some(active_unit_planned_path) = &self.active_unit_planned_path {
                 for (i, j, cost) in active_unit_planned_path.clone().iter() {
+
+                    let current_destination = (*i as usize, *j as usize);
                 
                     // Check if move is possible by checking updated remaining move
                     if remaining_moves >= (*cost - previous_cost) {
                         remaining_moves -= *cost - previous_cost;
-                        self.moves([*i as usize, *j as usize]);
-                        self.takes_territory((*i as usize, *j as usize));
-                        last_position = [*i as usize, *j as usize];
+                        self.moves(current_destination);
+                        self.takes_territory(current_destination);
                         previous_cost = *cost;
                     }
                 }
@@ -426,9 +451,7 @@ impl<'a> Game<'a> {
             self.active_unit_planned_path = None;
 
             // Update remaining move for the active unit
-            if let Some(active_unit) = &mut self.unit_map[(last_position[0], last_position[1])] {
-                active_unit.remaining_moves = remaining_moves;
-            }
+            active_unit.borrow_mut().remaining_moves = remaining_moves;
         }
     }
 
@@ -440,29 +463,27 @@ impl<'a> Game<'a> {
         ]
     }
 
-    fn shift_view(&mut self, shift: [f64; 2]) {
+    fn shift_view(&mut self, shift: (f64, f64)) {
         let frac =  1.0 / 2.0;
         self.view_in_map_i = 
-            (self.view_in_map_i + shift[0])
+            (self.view_in_map_i + shift.0)
             .max(-self.view_in_map_height * frac)
             .min(self.map_size as f64 - self.view_in_map_height * (1.0 - frac) - f64::EPSILON);
         
         self.view_in_map_j = 
-            (self.view_in_map_j + shift[1])
+            (self.view_in_map_j + shift.1)
             .max(-self.view_in_map_width * frac)
             .min(self.map_size as f64 - self.view_in_map_width * (1.0 - frac) - f64::EPSILON);
     }
 
-    fn look_at(&mut self, pos: [f64; 2]) {
-        // Extract grid coordinates
-        let (i, j) = (pos[0], pos[1]);
+    fn look_at(&mut self, pos: (f64, f64)) {
         
         // Shift view
         self.shift_view(
-            [
-                (i - self.view_in_map_height / 2.0) - self.view_in_map_i,
-                (j - self.view_in_map_width / 2.0) - self.view_in_map_j
-            ]
+            (
+                (pos.0 - self.view_in_map_height / 2.0) - self.view_in_map_i,
+                (pos.1 - self.view_in_map_width / 2.0) - self.view_in_map_j
+            )
         );
     }
 
@@ -486,12 +507,16 @@ impl<'a> Game<'a> {
     fn look_at_overview(&mut self) {
         self.view_in_map_width = self.map_size as f64;
         self.view_in_map_height = self.map_size as f64;
-        self.look_at([self.map_size as f64 / 2.0, self.map_size as f64 / 2.0]);
+        self.look_at((self.map_size as f64 / 2.0, self.map_size as f64 / 2.0));
+    }
+
+    fn look_at_cell(&mut self, cell: (usize, usize)) {
+        self.look_at((cell.0 as f64 + 0.5, cell.1 as f64 + 0.5));
     }
 
     fn look_at_active_user_base(&mut self) {
-        let active_player_base_position = self.players[self.active_player].base_position;
-        self.look_at([active_player_base_position[0] as f64, active_player_base_position[1] as f64]);
+        let base_pos = self.players[self.active_player].buildings[0].borrow().position;
+        self.look_at_cell(base_pos);
     }
 
     // Event and Update methods
@@ -553,107 +578,82 @@ impl<'a> Game<'a> {
                         let (ci, cj) = (cpos.0 as i32, cpos.1 as i32);
                         
                         // Check if there is an active unit
-                        if let Some(active_unit_position) = self.active_unit_position {
-                            
-                            let apos = (active_unit_position[0], active_unit_position[1]);
-                            if let Some(active_unit) = &self.unit_map[apos] {
-                                if let Some(underlying_unit) = &self.unit_map[cpos] {
-                                    
-                                    // Same unit --> Deactivation of unit
-                                    if underlying_unit == active_unit {
-                                        self.deactivate_active_unit();
+                        if self.active_unit.upgrade().is_some() {
+
+                            // Compute "optimal" path from active unit position to the pointed position
+                            let active_unit_position = self.active_unit.upgrade().unwrap().borrow().position;
+                            let start = (active_unit_position.0 as i32, active_unit_position.1 as i32);
+                            let goal = (ci, cj);
+                            let distance = EuclideanDistanceWHeight2D {
+                                height_map: &self.height_map
+                            };
+                            let heuristic = NullDistance2D {};
+                            // TODO : Create a Game attribute, "terrains" and make reference to it to avoid inconsistency
+                            let water_constraint = Box::new(TerrainConstraint {
+                                terrain_map: Rc::downgrade(&self.terrain_map),
+                                impractical_terrains: vec![
+                                    Terrain {
+                                        name: String::from("DeepWater"), 
+                                        color: [0.007, 0.176, 0.357, 1.0], 
+                                        height_interval: (0.0, 0.2)
+                                    },
+                                    Terrain {
+                                        name: String::from("CoastalWater"), 
+                                        color: [0.051, 0.286, 0.404, 1.0], 
+                                        height_interval: (0.2, 0.275)
                                     }
+                                ]
+                            });
 
-                                    // Unit of other player --> Possible attacks
-                                    else if active_unit.player != underlying_unit.player {
+                            let unit_constraint = Box::new(UnitConstraint {
+                                unit_map: Rc::downgrade(&self.unit_map)
+                            });
 
-                                    }
-
-                                    // Another unit of the same player --> Deactivation and Activation of other unit
-                                    else {
-                                        self.activate_unit(underlying_unit.position);
-                                    }
-                                }
-    
-                                // No underlying unit and active unit --> Possible moves
-                                else {
-                                    // Compute "optimal" path from active unit position to the pointed position
-                                    
-                                    let start = (apos.0 as i32, apos.1 as i32);
-                                    let goal = (ci, cj);
-                                    let distance = EuclideanDistanceWHeight2D {
-                                        height_map: &self.height_map
-                                    };
-                                    let heuristic = NullDistance2D {};
-                                    // TODO : Create a Game attribute, "terrains" and make reference to it to avoid inconsistency
-                                    let water_constraint = Box::new(TerrainConstraint {
-                                        terrain_map: Rc::clone(&self.terrain_map),
-                                        impractical_terrains: vec![
-                                            Terrain {
-                                                name: String::from("DeepWater"), 
-                                                color: [0.007, 0.176, 0.357, 1.0], 
-                                                height_interval: (0.0, 0.2)
-                                            },
-                                            Terrain {
-                                                name: String::from("CoastalWater"), 
-                                                color: [0.051, 0.286, 0.404, 1.0], 
-                                                height_interval: (0.2, 0.275)
-                                            }
-                                        ]
-                                    });
-
-                                    let path_res = astar_2d_map(
-                                        start, 
-                                        goal, 
-                                        (self.map_size as i32, self.map_size as i32), 
-                                        distance, 
-                                        heuristic,
-                                        vec![water_constraint],
-                                    );
-                                    if let Some(path) = path_res {
-                                        self.active_unit_planned_path = Some(path);
-                                    }
-                                    else {
-                                        self.active_unit_planned_path = None;
-                                        println!("Something wrong with path planning step");
-                                    }
-
-
-                                    // let d = (released_map_cell[0] as i32 - active_unit_position[0] as i32).abs() + (released_map_cell[1] as i32 - active_unit_position[1] as i32).abs();
-                                    // if d <= active_unit.remaining_moves as i32 {
-                                    //     // Make the moves
-                                    //     self.unit_map[(released_map_cell[0], released_map_cell[1])] = self.unit_map[(active_unit_position[0], active_unit_position[1])];
-                                    //     self.unit_map[(active_unit_position[0], active_unit_position[1])] = None;
-
-                                    //     // Update active unit remaining moves and position
-                                    //     if let Some(active_unit) = &mut self.unit_map[(released_map_cell[0], released_map_cell[1])] {
-                                    //         active_unit.remaining_moves -= d;
-                                    //         active_unit.position = released_map_cell;
-                                    //         self.territory_map[(released_map_cell[0], released_map_cell[1])] = active_unit.player;
-                                    //     }
-
-                                    //     // Update active unit positition
-                                    //     self.active_unit_position = Some(released_map_cell);
-                                    // }
-                                }
+                            let path_res = astar_2d_map(
+                                start, 
+                                goal, 
+                                (self.map_size as i32, self.map_size as i32), 
+                                distance, 
+                                heuristic,
+                                vec![water_constraint, unit_constraint],
+                                vec![],
+                            );
+                            if let Some(path) = path_res {
+                                self.active_unit_planned_path = Some(path);
                             }
                             else {
-
+                                self.active_unit_planned_path = None;
+                                println!("Something wrong with path planning step");
                             }
+
+
+                            // let d = (released_map_cell[0] as i32 - active_unit_position[0] as i32).abs() + (released_map_cell[1] as i32 - active_unit_position[1] as i32).abs();
+                            // if d <= active_unit.remaining_moves as i32 {
+                            //     // Make the moves
+                            //     self.unit_map[(released_map_cell[0], released_map_cell[1])] = self.unit_map[(active_unit_position[0], active_unit_position[1])];
+                            //     self.unit_map[(active_unit_position[0], active_unit_position[1])] = None;
+
+                            //     // Update active unit remaining moves and position
+                            //     if let Some(active_unit) = &mut self.unit_map[(released_map_cell[0], released_map_cell[1])] {
+                            //         active_unit.remaining_moves -= d;
+                            //         active_unit.position = released_map_cell;
+                            //         self.territory_map[(released_map_cell[0], released_map_cell[1])] = active_unit.player;
+                            //     }
+
+                            //     // Update active unit positition
+                            //     self.active_unit_position = Some(released_map_cell);
+                            // }
                         }
 
-                        // No active unit 
-                        else {
+                        // Activation underlying unit
+                        if self.unit_map.borrow()[cpos].upgrade().is_some() {
                             
-                            // Activation underlying unit
-                            if let Some(underlying_unit) = &self.unit_map[(released_map_cell[0], released_map_cell[1])] {
-                                
-                                if underlying_unit.player == self.active_player {
-                                    self.active_unit_position = Some(underlying_unit.position);
-                                }
+                            if self.unit_map.borrow()[cpos].upgrade().unwrap().borrow().player == self.active_player {
+                                self.activate_unit(cpos);
+                                self.active_unit = self.unit_map.borrow()[cpos].clone();
                             }
                         }
-                    }   
+                    }
                 }
 
                 self.pressed_map_cell = None;
@@ -668,16 +668,16 @@ impl<'a> Game<'a> {
             let view_move_j = self.view_in_map_width * view_move_in_view_size_ratio;
             match key {
                 Key::Up | Key::Z => {
-                    self.shift_view([-view_move_i, 0.0]);
+                    self.shift_view((-view_move_i, 0.0));
                 },
                 Key::Down | Key::S => {
-                    self.shift_view([view_move_i, 0.0]);
+                    self.shift_view((view_move_i, 0.0));
                 },
                 Key::Left | Key::Q => {
-                    self.shift_view([0.0, -view_move_j]);
+                    self.shift_view((0.0, -view_move_j));
                 },
                 Key::Right | Key::D => {
-                    self.shift_view([0.0, view_move_j]);
+                    self.shift_view((0.0, view_move_j));
                 },
                 Key::T => {
                     self.turn();
@@ -728,7 +728,7 @@ impl<'a> Game<'a> {
                 let transform = c.transform.trans(x, y);
 
                 // Draw each grid cell
-                rectangle(self.terrain_map[(i, j)].color, cell, transform, self.gl.as_mut().unwrap());
+                rectangle(self.terrain_map.borrow()[(i, j)].color, cell, transform, self.gl.as_mut().unwrap());
             }
         }
 
@@ -801,69 +801,50 @@ impl<'a> Game<'a> {
     fn render_planned_path(&mut self, c: Context) {
         
         // Check if there is an active unit
-        if let Some(active_unit_position) = self.active_unit_position {
+        if let Some(active_unit) = self.active_unit.upgrade() {
+            
+            // If there is an active planned path -> Render it
+            if let Some(path) = &self.active_unit_planned_path {
 
-            let apos = (active_unit_position[0], active_unit_position[1]);
-            if let Some(active_unit) = &self.unit_map[apos] {
+                // Compute cell dimensions in pixel, define reachable mask shape font size and cost text
+                let (cell_pix_width, cell_pix_height) = self.cell_pixel();
+                let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
+                let cost_font_size = (cell_pix_height / 6.0).floor() as u32;
+                let cost_text = Text {
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    font_size: cost_font_size,
+                    round: false
+                };
 
-                // If there is an active planned path -> Render it
-                if let Some(path) = &self.active_unit_planned_path {
+                let turn_font_size = (cell_pix_height / 4.0).floor() as u32;
+                let turn_text = Text {
+                    color: [1.0, 0.0, 1.0, 1.0],
+                    font_size: turn_font_size,
+                    round: false
+                };
 
-                    // Compute cell dimensions in pixel, define reachable mask shape font size and cost text
-                    let (cell_pix_width, cell_pix_height) = self.cell_pixel();
-                    let reachable_cell = rectangle_by_corners(0.0, 0.0, cell_pix_width, cell_pix_height);
-                    let cost_font_size = (cell_pix_height / 6.0).floor() as u32;
-                    let cost_text = Text {
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        font_size: cost_font_size,
-                        round: false
-                    };
-
-                    let turn_font_size = (cell_pix_height / 4.0).floor() as u32;
-                    let turn_text = Text {
-                        color: [1.0, 0.0, 1.0, 1.0],
-                        font_size: turn_font_size,
-                        round: false
-                    };
-
-                    let visible_map_bounds = self.visible_map_bounds();
-                    
-                    // TODO : Don't draw the first position
-                    let mut max_cost_in_turn = 0.0;
-                    for (i, j, cost) in path.iter().skip(1) {
-                        if is_in_rect((*i, *j), visible_map_bounds, false) {
-                            let (x, y) = self.map_position_to_window_position((*i, *j));
-                            let transform = c.transform.trans(x, y);
-                            if (*cost - active_unit.remaining_moves as f64) < 0.0 {
-                                max_cost_in_turn = *cost;
-                                rectangle([0.0, 1.0, 0.0, 0.3], reachable_cell, transform, self.gl.as_mut().unwrap());
-                            }
-                            else {
-                                let turn_to_arrive = ((*cost - max_cost_in_turn) / active_unit.speed as f64).ceil();
-                                rectangle([1.0, 0.0, 0.0, 0.3], reachable_cell, transform, self.gl.as_mut().unwrap());
-                                
-                                let turn_to_arrive_str = turn_to_arrive.to_string();
-                                let turn_to_arrive_str_len = turn_to_arrive_str.len();
-                                
-                                let draw_res = turn_text.draw(
-                                    turn_to_arrive_str.as_str(), self.glyphs.as_mut().unwrap(), 
-                                    &draw_state::DrawState::default(), 
-                                    c.transform.trans(x + cell_pix_width - turn_to_arrive_str_len as f64 * turn_font_size as f64, y + cell_pix_height), 
-                                    self.gl.as_mut().unwrap()
-                                );
-
-                                if let Err(_error) = draw_res {
-                                    dbg!("Something went wrong when drawing planned path !");
-                                }
-                            }
+                let visible_map_bounds = self.visible_map_bounds();
+                
+                let mut max_cost_in_turn = 0.0;
+                for (i, j, cost) in path.iter().skip(1) {
+                    if is_in_rect((*i, *j), visible_map_bounds, false) {
+                        let (x, y) = self.map_position_to_window_position((*i, *j));
+                        let transform = c.transform.trans(x, y);
+                        if (*cost - active_unit.borrow().remaining_moves) < 0.0 {
+                            max_cost_in_turn = *cost;
+                            rectangle([0.0, 1.0, 0.0, 0.3], reachable_cell, transform, self.gl.as_mut().unwrap());
+                        }
+                        else {
+                            let turn_to_arrive = ((*cost - max_cost_in_turn) / active_unit.borrow().speed as f64).ceil();
+                            rectangle([1.0, 0.0, 0.0, 0.3], reachable_cell, transform, self.gl.as_mut().unwrap());
                             
-                            let cost_str = ((cost * 10.0).floor() / 10.0).to_string();
-                            let cost_str_len = cost_str.len();
+                            let turn_to_arrive_str = turn_to_arrive.to_string();
+                            let turn_to_arrive_str_len = turn_to_arrive_str.len();
                             
-                            let draw_res = cost_text.draw(
-                                cost_str.as_str(), self.glyphs.as_mut().unwrap(), 
+                            let draw_res = turn_text.draw(
+                                turn_to_arrive_str.as_str(), self.glyphs.as_mut().unwrap(), 
                                 &draw_state::DrawState::default(), 
-                                c.transform.trans(x + cell_pix_width - cost_str_len as f64 * cost_font_size as f64, y + cost_font_size as f64), 
+                                c.transform.trans(x + cell_pix_width - turn_to_arrive_str_len as f64 * turn_font_size as f64, y + cell_pix_height), 
                                 self.gl.as_mut().unwrap()
                             );
 
@@ -871,8 +852,22 @@ impl<'a> Game<'a> {
                                 dbg!("Something went wrong when drawing planned path !");
                             }
                         }
-                    }               
-                }
+                        
+                        let cost_str = ((cost * 10.0).floor() / 10.0).to_string();
+                        let cost_str_len = cost_str.len();
+                        
+                        let draw_res = cost_text.draw(
+                            cost_str.as_str(), self.glyphs.as_mut().unwrap(), 
+                            &draw_state::DrawState::default(), 
+                            c.transform.trans(x + cell_pix_width - cost_str_len as f64 * cost_font_size as f64, y + cost_font_size as f64), 
+                            self.gl.as_mut().unwrap()
+                        );
+
+                        if let Err(_error) = draw_res {
+                            dbg!("Something went wrong when drawing planned path !");
+                        }
+                    }
+                }               
             }
         }
     }
@@ -902,11 +897,11 @@ impl<'a> Game<'a> {
         // Draw units
         for i in view_in_map_i1..view_in_map_i2 {
             for j in view_in_map_j1..view_in_map_j2 {
-                if let Some(building) = &self.building_map[(i as usize, j as usize)] {
+                if let Some(building) = self.building_map.borrow()[(i, j)].upgrade() {
                     building_rectangle
-                        .color(self.players[building.player].principal_color)
+                        .color(self.players[building.borrow().player].principal_color)
                         .border(graphics::rectangle::Border {
-                            color: self.players[building.player].secondary_color,
+                            color: self.players[building.borrow().player].secondary_color,
                             radius: (building_pix_width / 2.0) * border_padding_ratio})
                         .draw(
                             rectangle, 
@@ -945,12 +940,12 @@ impl<'a> Game<'a> {
         // Draw units
         for i in view_in_map_i1..view_in_map_i2 {
             for j in view_in_map_j1..view_in_map_j2 {
-                if let Some(unit) = &self.unit_map[(i, j)] {
+                if let Some(unit) = self.unit_map.borrow()[(i, j)].upgrade() {
                     let (x, y) = self.map_position_to_window_position((i, j));
                     unit_ellipse
-                        .color(self.players[unit.player].principal_color)
+                        .color(self.players[unit.borrow().player].principal_color)
                         .border(graphics::ellipse::Border {
-                            color: self.players[unit.player].secondary_color,
+                            color: self.players[unit.borrow().player].secondary_color,
                             radius: (unit_pix_width / 2.0) * border_padding_ratio})
                         .draw(
                             rectangle, &draw_state::DrawState::default(), 
@@ -961,8 +956,8 @@ impl<'a> Game<'a> {
         }
 
         // Draw marker on active unit if there is one and if it is visible
-        if let Some(active_unit_position) = self.active_unit_position {
-            if is_in_rect((active_unit_position[0] as i32, active_unit_position[1] as i32), visible_map_bounds, false) {
+        if let Some(active_unit) = self.active_unit.upgrade() {
+            if is_in_rect((active_unit.borrow().position.0 as i32, active_unit.borrow().position.1 as i32), visible_map_bounds, false) {
                 let cell_padding_ratio = 1.0 / 2.5;
                 let marker_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
                 let marker_pix_height = cell_pix_height * (1.0 - cell_padding_ratio * 2.0);
@@ -975,7 +970,7 @@ impl<'a> Game<'a> {
                     border: None,
                     resolution: 32
                 };
-                let (x, y) = self.map_position_to_window_position((active_unit_position[0] as i32, active_unit_position[1] as i32));
+                let (x, y) = self.map_position_to_window_position((active_unit.borrow().position.0 as i32, active_unit.borrow().position.1 as i32));
 
                 active_unit_marker.draw(
                     rectangle, &draw_state::DrawState::default(), 
