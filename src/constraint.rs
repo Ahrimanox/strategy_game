@@ -2,15 +2,15 @@
 use std::cell::RefCell;
 use std::rc::{Weak};
 use crate::map::Map;
-use crate::game::{Terrain, Unit};
+use crate::game::{Terrain, Unit, Building};
 
 pub trait PositionConstraint {
     fn respect(&self, pos: (usize, usize)) -> bool;
 }
 
 pub struct TerrainConstraint {
-    pub terrain_map: Weak<RefCell<Map<Terrain>>>,
-    pub impractical_terrains: Vec<Terrain>
+    pub terrain_map: Weak<RefCell<Map<Weak<Terrain>>>>,
+    pub impractical_terrains: Vec<Weak<Terrain>>
 }
 
 impl PositionConstraint for TerrainConstraint {
@@ -21,9 +21,13 @@ impl PositionConstraint for TerrainConstraint {
             let underlying_terrain = &terrain_map.borrow()[pos];
             
             // Check if underlying terrain is not one of impractical ones
-            for impractical_terrain in self.impractical_terrains.iter() {
-                if *impractical_terrain == *underlying_terrain {
-                    return false;
+            if let Some(underlying_terrain) = underlying_terrain.upgrade() {
+                for impractical_terrain in self.impractical_terrains.iter() {
+                    if let Some(impractical_terrain) = impractical_terrain.upgrade() {
+                        if impractical_terrain == underlying_terrain {
+                            return false;
+                        }
+                    }
                 }
             }
         }
@@ -49,7 +53,7 @@ impl PositionConstraint for UnitConstraint {
 }
 
 pub struct BuildingConstraint {
-    pub building_map: Weak<RefCell<Map<Weak<RefCell<BuildingConstraint>>>>>
+    pub building_map: Weak<RefCell<Map<Weak<RefCell<Building>>>>>
 }
 
 impl PositionConstraint for BuildingConstraint {

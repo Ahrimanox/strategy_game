@@ -46,7 +46,7 @@ pub use crate::player::{
 };
 
 use crate::distance::{NullDistance2D, EuclideanDistanceWHeight2D};
-use crate::constraint::{TerrainConstraint, UnitConstraint};
+use crate::constraint::{TerrainConstraint, UnitConstraint, BuildingConstraint};
 use crate::path_planning::astar_2d_map;
 
 // Structure used to holding terrain information
@@ -116,8 +116,9 @@ pub struct Game<'g> {
     pub height_map: Map<f64>,
 
     // Terrain map
-    pub terrain_map: Rc<RefCell<Map<Terrain>>>,
+    pub terrain_map: Rc<RefCell<Map<Weak<Terrain>>>>,
 
+    pub terrains: Vec<Rc<Terrain>>,
     pub color_ramp_value: Vec<f64>,
     pub color_ramp_color: Vec<[f32; 4]>,
 
@@ -261,14 +262,14 @@ impl<'g> Game<'g> {
             16,
             lacunarity,
             lacunarity, 
-            2.0, 
+            1.0, 
             false
         );
 
         // Assign Terrain to map cell according to cell height
         // TODO : Pass terrain information by configuration file to reduce code complexity
         // TODO : Create Game attribute with all possible Terrain
-        let terrain_list = [
+        let terrain_vec: Vec<Terrain> = vec![
             Terrain {name: String::from("DeepWater"), color: [0.007, 0.176, 0.357, 1.0], height_interval: (0.0, 0.2)},
             Terrain {name: String::from("CoastalWater"), color: [0.051, 0.286, 0.404, 1.0], height_interval: (0.2, 0.275)},
             Terrain {name: String::from("Sand"), color: [0.98, 0.84, 0.45, 1.0], height_interval: (0.275, 0.3)},
@@ -277,13 +278,15 @@ impl<'g> Game<'g> {
             Terrain {name: String::from("SnowyPeak"), color: [1.0, 1.0, 1.0, 1.0], height_interval: (0.90, 1.0 + 0.01)},
         ];
 
-        self.terrain_map = Rc::new(RefCell::new(Map::<Terrain>::new(self.map_size, self.map_size, Terrain::default())));
+        self.terrains.extend(terrain_vec.into_iter().map(|x| Rc::new(x)));
+        
+        self.terrain_map = Rc::new(RefCell::new(Map::<Weak<Terrain>>::new(self.map_size, self.map_size, Weak::new())));
         for i in 0..self.map_size {
             for j in 0..self.map_size {
-                for terrain in terrain_list.iter() {
+                for terrain in self.terrains.iter() {
                     let height = self.height_map[(i, j)];
                     if height >= terrain.height_interval.0 && height < terrain.height_interval.1 {
-                        self.terrain_map.borrow_mut()[(i, j)] = (*terrain).clone();
+                        self.terrain_map.borrow_mut()[(i, j)] = Rc::downgrade(terrain);
                     }
                 }
             }
@@ -425,7 +428,7 @@ impl<'g> Game<'g> {
 
     fn execute_planned_path(&mut self) {
         
-        // Check if there is an active unit by taking active unit position
+        // Check if there is an active unit
         if let Some(active_unit) = self.active_unit.upgrade() {
 
             let mut remaining_moves = active_unit.borrow().remaining_moves;
@@ -520,6 +523,7 @@ impl<'g> Game<'g> {
     }
 
     // Event and Update methods
+    // TODO : Collect differents input and store them in an appropriate structure
     pub fn process_event(&mut self, event: Event) {
 
         // Update the current mouse position and underlying cell (if possible)
@@ -592,22 +596,21 @@ impl<'g> Game<'g> {
                             let water_constraint = Box::new(TerrainConstraint {
                                 terrain_map: Rc::downgrade(&self.terrain_map),
                                 impractical_terrains: vec![
-                                    Terrain {
-                                        name: String::from("DeepWater"), 
-                                        color: [0.007, 0.176, 0.357, 1.0], 
-                                        height_interval: (0.0, 0.2)
-                                    },
-                                    Terrain {
-                                        name: String::from("CoastalWater"), 
-                                        color: [0.051, 0.286, 0.404, 1.0], 
-                                        height_interval: (0.2, 0.275)
-                                    }
+                                    Rc::downgrade(&self.terrains[0]),
+                                    Rc::downgrade(&self.terrains[1])
                                 ]
                             });
 
-                            let unit_constraint = Box::new(UnitConstraint {
-                                unit_map: Rc::downgrade(&self.unit_map)
-                            });
+                            let unit_constraint = Box::new(
+                                UnitConstraint {
+                                    unit_map: Rc::downgrade(&self.unit_map)
+                                }
+                            );
+                            let building_constraint = Box::new(
+                                BuildingConstraint {
+                                    building_map: Rc::downgrade(&self.building_map)
+                                }
+                            );
 
                             let path_res = astar_2d_map(
                                 start, 
@@ -615,7 +618,7 @@ impl<'g> Game<'g> {
                                 (self.map_size as i32, self.map_size as i32), 
                                 distance, 
                                 heuristic,
-                                vec![water_constraint, unit_constraint],
+                                vec![water_constraint, unit_constraint, building_constraint],
                                 vec![],
                             );
                             if let Some(path) = path_res {
@@ -728,7 +731,16 @@ impl<'g> Game<'g> {
                 let transform = c.transform.trans(x, y);
 
                 // Draw each grid cell
-                rectangle(self.terrain_map.borrow()[(i, j)].color, cell, transform, self.gl.as_mut().unwrap());
+                let terrain = &self.terrain_map.borrow()[(i, j)];
+                if let Some(terrain) = terrain.upgrade() {
+                    rectangle(
+                        terrain.color, 
+                        cell, 
+                        transform, 
+                        self.gl.as_mut().unwrap()
+                    );
+                }
+                
             }
         }
 

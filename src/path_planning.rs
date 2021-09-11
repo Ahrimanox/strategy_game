@@ -47,11 +47,11 @@ const NEIGHBORS_DIRECTION_4C: [(i32, i32); 4] = [
 ];
 
 /// Const neighbors allowed direction for 8-connexity grid
-const _NEIGHBORS_DIRECTION_8C: [(i32, i32); 8] = [
+const NEIGHBORS_DIRECTION_8C: [(i32, i32); 8] = [
     (-1, 0),    // NORTH
     (-1, -1),   // NORTH-WEST
     (0, -1),    // WEST
-    (-1, 1),    // SOUTH-WEST       
+    (-1, 1),    // SOUTH-WEST
     (1, 0),     // SOUTH
     (1, 1),     // SOUTH-EAST
     (0, 1),     // EAST
