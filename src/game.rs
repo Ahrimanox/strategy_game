@@ -38,15 +38,21 @@ use crate::map::{
     noise_map
 };
 
-// TODO : Change ownership of Unit -> Game owns Players that owns their Units via Rc and unit_map refers to them by Weak
 pub use crate::player::{
     Unit, 
     Building, 
     Player
 };
 
-use crate::distance::{NullDistance2D, EuclideanDistanceWHeight2D};
-use crate::constraint::{TerrainConstraint, UnitConstraint, BuildingConstraint};
+use crate::distance::{
+    NullDistance2D, 
+    EuclideanDistanceWHeight2D
+};
+use crate::constraint::{
+    TerrainConstraint, 
+    UnitConstraint, 
+    BuildingConstraint
+};
 use crate::path_planning::astar_2d_map;
 
 // Structure used to holding terrain information
@@ -268,7 +274,6 @@ impl<'g> Game<'g> {
 
         // Assign Terrain to map cell according to cell height
         // TODO : Pass terrain information by configuration file to reduce code complexity
-        // TODO : Create Game attribute with all possible Terrain
         let terrain_vec: Vec<Terrain> = vec![
             Terrain {name: String::from("DeepWater"), color: [0.007, 0.176, 0.357, 1.0], height_interval: (0.0, 0.2)},
             Terrain {name: String::from("CoastalWater"), color: [0.051, 0.286, 0.404, 1.0], height_interval: (0.2, 0.275)},
@@ -374,6 +379,22 @@ impl<'g> Game<'g> {
     }
 
     // Gameplay functions
+    fn is_there_unit_on(&self, pos: (usize, usize)) -> bool {
+        self.unit_map.borrow()[pos].upgrade().is_some()
+    }
+
+    fn is_there_building_on(&self, pos: (usize, usize)) -> bool {
+        self.building_map.borrow()[pos].upgrade().is_some()
+    }
+
+    fn unit(&self, pos: (usize, usize)) -> Weak<RefCell<Unit>> {
+        self.unit_map.borrow()[pos].clone()
+    }
+
+    fn building(&self, pos: (usize, usize)) -> Weak<RefCell<Building>> {
+        self.building_map.borrow()[pos].clone()
+    }
+
     fn turn(&mut self) {
 
         // Update active player and reset active unit
@@ -381,7 +402,8 @@ impl<'g> Game<'g> {
 
         self.deactivate_active_unit();
 
-        self.look_at_active_user_base();
+        // self.look_at_active_user_base();
+        self.look_at_overview();
 
         // Restore all moves of current active player units
         for player in &self.players {
@@ -414,11 +436,13 @@ impl<'g> Game<'g> {
         if let Some(active_unit) = self.active_unit.upgrade() {
             
             // Make the moves
-            self.unit_map.borrow_mut()[active_unit.borrow().position] = Weak::new();
             self.unit_map.borrow_mut()[destination] = self.active_unit.clone();
+            self.unit_map.borrow_mut()[active_unit.borrow().position] = Weak::new();
             
             // Update active unit position attribute
             active_unit.borrow_mut().position = destination;
+
+            self.takes_territory(destination);
         }
     }
 
@@ -431,20 +455,56 @@ impl<'g> Game<'g> {
         // Check if there is an active unit
         if let Some(active_unit) = self.active_unit.upgrade() {
 
-            let mut remaining_moves = active_unit.borrow().remaining_moves;
-
             // If there is an active planned path -> Execute it
             let mut previous_cost = 0.0;
             if let Some(active_unit_planned_path) = &self.active_unit_planned_path {
-                for (i, j, cost) in active_unit_planned_path.clone().iter() {
+                for (i, j, cost) in active_unit_planned_path.clone().iter().skip(1) {
 
                     let current_destination = (*i as usize, *j as usize);
                 
                     // Check if move is possible by checking updated remaining move
-                    if remaining_moves >= (*cost - previous_cost) {
-                        remaining_moves -= *cost - previous_cost;
-                        self.moves(current_destination);
-                        self.takes_territory(current_destination);
+                    if active_unit.borrow().remaining_moves >= (*cost - previous_cost) {
+                        
+                        if self.is_there_unit_on(current_destination) {
+                            
+                            let unit_on_destination = self.unit(current_destination).upgrade().unwrap();
+                            
+                            // Actions that a unit can do to other allied units
+                            // TODO : implement rule for this case
+                            if unit_on_destination.borrow().player == active_unit.borrow().player {
+                                break;
+                            }
+                            // Attack
+                            else {
+                                unit_on_destination.borrow_mut().health -= active_unit.borrow().damage;
+                                active_unit.borrow_mut().remaining_moves -= *cost - previous_cost;
+                                self.players[unit_on_destination.borrow().player].purge_dead_units();
+                                break;
+                            }
+                        }
+                        else if self.is_there_building_on(current_destination) {
+                            
+                            let building_on_destination = self.building(current_destination).upgrade().unwrap();
+                            
+                            // Actions that a unit can do to other allied units
+                            // TODO : implement rule for this case
+                            if building_on_destination.borrow().player == active_unit.borrow().player {
+                                break;
+                            }
+                            // Attack
+                            else {
+                                building_on_destination.borrow_mut().health -= active_unit.borrow().damage;
+                                active_unit.borrow_mut().remaining_moves -= *cost - previous_cost;
+                                self.players[building_on_destination.borrow().player].purge_dead_buildings();
+                                break;
+                            }
+                        }
+                        else {
+                            self.moves(current_destination);
+
+                            active_unit.borrow_mut().remaining_moves -= *cost - previous_cost;
+                        }
+                        
                         previous_cost = *cost;
                     }
                 }
@@ -452,9 +512,6 @@ impl<'g> Game<'g> {
             
             // Reset active unit planned path
             self.active_unit_planned_path = None;
-
-            // Update remaining move for the active unit
-            active_unit.borrow_mut().remaining_moves = remaining_moves;
         }
     }
 
@@ -592,7 +649,6 @@ impl<'g> Game<'g> {
                                 height_map: &self.height_map
                             };
                             let heuristic = NullDistance2D {};
-                            // TODO : Create a Game attribute, "terrains" and make reference to it to avoid inconsistency
                             let water_constraint = Box::new(TerrainConstraint {
                                 terrain_map: Rc::downgrade(&self.terrain_map),
                                 impractical_terrains: vec![
@@ -649,9 +705,9 @@ impl<'g> Game<'g> {
                         }
 
                         // Activation underlying unit
-                        if self.unit_map.borrow()[cpos].upgrade().is_some() {
+                        if self.is_there_unit_on(cpos) {
                             
-                            if self.unit_map.borrow()[cpos].upgrade().unwrap().borrow().player == self.active_player {
+                            if self.unit(cpos).upgrade().unwrap().borrow().player == self.active_player {
                                 self.activate_unit(cpos);
                                 self.active_unit = self.unit_map.borrow()[cpos].clone();
                             }
@@ -900,10 +956,12 @@ impl<'g> Game<'g> {
         let building_rectangle = Rectangle {
             color: [1.0, 1.0, 1.0, 1.0],
             shape: graphics::rectangle::Shape::Square,
-            border: Some(graphics::rectangle::Border {
-                color: [0.0, 0.0, 0.0, 1.0],
-                radius: (building_pix_width / 2.0) * border_padding_ratio
-            })
+            border: Some(
+                graphics::rectangle::Border {
+                    color: [0.0, 0.0, 0.0, 1.0],
+                    radius: (building_pix_width / 2.0) * border_padding_ratio
+                }
+            )
         };
 
         // Draw units
@@ -912,9 +970,12 @@ impl<'g> Game<'g> {
                 if let Some(building) = self.building_map.borrow()[(i, j)].upgrade() {
                     building_rectangle
                         .color(self.players[building.borrow().player].principal_color)
-                        .border(graphics::rectangle::Border {
-                            color: self.players[building.borrow().player].secondary_color,
-                            radius: (building_pix_width / 2.0) * border_padding_ratio})
+                        .border(
+                            graphics::rectangle::Border {
+                                color: self.players[building.borrow().player].secondary_color,
+                                radius: (building_pix_width / 2.0) * border_padding_ratio
+                            }
+                        )
                         .draw(
                             rectangle, 
                             &draw_state::DrawState::default(), 
@@ -942,10 +1003,12 @@ impl<'g> Game<'g> {
         let border_padding_ratio = 1.0 / 10.0;
         let unit_ellipse = Ellipse {
             color: [1.0, 1.0, 1.0, 1.0],
-            border: Some(graphics::ellipse::Border {
-                color: [1.0, 1.0, 1.0, 1.0],
-                radius: (unit_pix_width / 2.0) * border_padding_ratio
-            }),
+            border: Some(
+                graphics::ellipse::Border {
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    radius: (unit_pix_width / 2.0) * border_padding_ratio
+                }
+            ),
             resolution: 32
         };
 
@@ -956,12 +1019,17 @@ impl<'g> Game<'g> {
                     let (x, y) = self.map_position_to_window_position((i, j));
                     unit_ellipse
                         .color(self.players[unit.borrow().player].principal_color)
-                        .border(graphics::ellipse::Border {
-                            color: self.players[unit.borrow().player].secondary_color,
-                            radius: (unit_pix_width / 2.0) * border_padding_ratio})
+                        .border(
+                            graphics::ellipse::Border {
+                                color: self.players[unit.borrow().player].secondary_color,
+                                radius: (unit_pix_width / 2.0) * border_padding_ratio
+                            }
+                        )
                         .draw(
-                            rectangle, &draw_state::DrawState::default(), 
-                            c.transform.trans(x, y), self.gl.as_mut().unwrap()
+                            rectangle, 
+                            &draw_state::DrawState::default(), 
+                            c.transform.trans(x, y), 
+                            self.gl.as_mut().unwrap()
                         );
                 }
             }
@@ -974,19 +1042,28 @@ impl<'g> Game<'g> {
                 let marker_pix_width = cell_pix_width * (1.0 - cell_padding_ratio * 2.0);
                 let marker_pix_height = cell_pix_height * (1.0 - cell_padding_ratio * 2.0);
                 let rectangle = [
-                    cell_pix_width * cell_padding_ratio, cell_pix_height * cell_padding_ratio, 
-                    marker_pix_width, marker_pix_height
+                    cell_pix_width * cell_padding_ratio, 
+                    cell_pix_height * cell_padding_ratio, 
+                    marker_pix_width, 
+                    marker_pix_height
                 ];
                 let active_unit_marker = Ellipse {
                     color: [0.0, 0.0, 0.0, 1.0],
                     border: None,
                     resolution: 32
                 };
-                let (x, y) = self.map_position_to_window_position((active_unit.borrow().position.0 as i32, active_unit.borrow().position.1 as i32));
+                let (x, y) = self.map_position_to_window_position(
+                    (
+                        active_unit.borrow().position.0 as i32, 
+                        active_unit.borrow().position.1 as i32
+                    )
+                );
 
                 active_unit_marker.draw(
-                    rectangle, &draw_state::DrawState::default(), 
-                    c.transform.trans(x, y), self.gl.as_mut().unwrap()
+                    rectangle, 
+                    &draw_state::DrawState::default(), 
+                    c.transform.trans(x, y), 
+                    self.gl.as_mut().unwrap()
                 );
             }
         }
@@ -1013,9 +1090,13 @@ impl<'g> Game<'g> {
 
                     let (x, y) = self.map_position_to_window_position((i, j));
 
-                    player_text.draw(player.to_string().as_str() , self.glyphs.as_mut().unwrap(),
-                                     &draw_state::DrawState::default(), c.transform.trans(x, y + font_size as f64),
-                                     self.gl.as_mut().unwrap());
+                    let _draw_res = player_text.draw(
+                        player.to_string().as_str(), 
+                        self.glyphs.as_mut().unwrap(),
+                        &draw_state::DrawState::default(), 
+                        c.transform.trans(x, y + font_size as f64),
+                        self.gl.as_mut().unwrap()
+                    );
                 }
             }
         }

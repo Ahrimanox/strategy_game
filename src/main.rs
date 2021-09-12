@@ -26,7 +26,7 @@ fn main_game() {
     let factor = 3.0 / 4.0;
     let window_width = 1600.0 * factor;
     let window_height = 900.0 * factor;
-    let mut window: GlutinWindow = WindowSettings::new("Strategy Game", [window_width, window_height])
+    let mut window: GlutinWindow = WindowSettings::new("Territory War", [window_width, window_height])
         .graphics_api(opengl)
         .exit_on_esc(true)
         .resizable(false)
@@ -38,7 +38,7 @@ fn main_game() {
     let glyphs: GlyphCache = GlyphCache::new("fonts/FSEX300.ttf", (), texture_settings).expect("Failed to load font !");
 
     // Create a new game instance and run it.
-    let map_size_level = 2;
+    let map_size_level = 0;
     let mut game = Game {
         gl: Some(GlGraphics::new(opengl)),
         glyphs: Some(glyphs),

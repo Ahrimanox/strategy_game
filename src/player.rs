@@ -17,6 +17,12 @@ pub struct Unit {
     pub remaining_moves: f64
 }
 
+impl Unit {
+    pub fn is_dead(&self) -> bool {
+        self.health < 0.
+    }
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Building {
 
@@ -27,8 +33,14 @@ pub struct Building {
     pub position: (usize, usize),
 
     // Attributes
-    pub damage: i32,
-    pub health: i32,
+    pub damage: f64,
+    pub health: f64,
+}
+
+impl Building {
+    pub fn is_dead(&self) -> bool {
+        self.health < 0.
+    }
 }
 
 pub struct Player {
@@ -70,8 +82,8 @@ impl Player {
                     Building {
                         player: num,
                         position: base_position,
-                        damage: 0,
-                        health: 1
+                        damage: 0.,
+                        health: 1.
                     }
                 )
             )
@@ -79,6 +91,33 @@ impl Player {
 
         return player
     }
+
+    pub fn purge_dead_units(&mut self) {
+        let mut units_to_remove_idx = Vec::new();
+        for i in 0..self.units.len() {
+            if self.units[i].borrow().is_dead() {
+                units_to_remove_idx.push(i);
+            }
+        }
+
+        for unit_to_remove_idx in units_to_remove_idx {
+            self.units.remove(unit_to_remove_idx);
+        }
+    }
+
+    pub fn purge_dead_buildings(&mut self) {
+        let mut buildings_to_remove_idx = Vec::new();
+        for i in 0..self.buildings.len() {
+            if self.buildings[i].borrow().is_dead() {
+                buildings_to_remove_idx.push(i);
+            }
+        }
+
+        for building_to_remove_idx in buildings_to_remove_idx {
+            self.buildings.remove(building_to_remove_idx);
+        }
+    }
+
 
     // TODO : Add a function to create new units in a neighbourhood of generator building
 }
